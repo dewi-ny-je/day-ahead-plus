@@ -1,5 +1,88 @@
 {
   "$defs": {
+    "AdditionalBaseloadConfig": {
+      "additionalProperties": true,
+      "description": "Forecast of an uncontrolled load that is added to the baseload.",
+      "properties": {
+        "name": {
+          "description": "Name of the load",
+          "title": "Name",
+          "type": "string",
+          "x-help": "Descriptive name for this load, for example 'Air conditioner' or 'Dishwasher'. Used in the logging.",
+          "x-ui-section": "Additional baseload"
+        },
+        "entity forecast": {
+          "$ref": "#/$defs/EntityId",
+          "description": "HA entity with the forecast of the load in an attribute",
+          "x-help": "Home Assistant entity that holds the forecast of this load in one of its attributes. The attribute is a list of entries, each with a start time, a duration and a power. DAO aligns the entries to its own intervals, so they need not start or end on a quarter.",
+          "x-ui-section": "Additional baseload",
+          "x-ui-widget-filter": "sensor",
+          "title": "Entity Forecast"
+        },
+        "ha attribute": {
+          "default": "forecast",
+          "description": "Name of the attribute of the forecast entity that holds the list of entries",
+          "title": "Ha Attribute",
+          "type": "string",
+          "x-help": "Name of the attribute of the forecast entity that holds the list of entries.",
+          "x-ui-section": "Additional baseload"
+        },
+        "ha start field": {
+          "default": "start",
+          "description": "Name of the start time field in an entry",
+          "title": "Ha Start Field",
+          "type": "string",
+          "x-help": "Name/key of the field with the start of an entry: a date and time, preferably with a time zone (ISO 8601). Without a time zone the local time is assumed.",
+          "x-ui-section": "Additional baseload"
+        },
+        "ha duration field": {
+          "default": "duration",
+          "description": "Name of the duration field in an entry",
+          "title": "Ha Duration Field",
+          "type": "string",
+          "x-help": "Name/key of the field with the duration of an entry: a number of minutes, or a text like '01:30:00' (hours:minutes:seconds).",
+          "x-ui-section": "Additional baseload",
+          "x-unit": "min"
+        },
+        "ha power field": {
+          "default": "power",
+          "description": "Name of the power field in an entry",
+          "title": "Ha Power Field",
+          "type": "string",
+          "x-help": "Name/key of the field with the average power of the load during the entry, in watts.",
+          "x-ui-section": "Additional baseload",
+          "x-unit": "W"
+        },
+        "entity energy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "HA energy entity (kWh or Wh) with the measured consumption of the load",
+          "x-help": "Optional: Home Assistant energy entity (kWh or Wh, never power) with the measured consumption of this load. It must have a state_class ('total_increasing', or 'total' with last_reset), so that Home Assistant keeps long-term statistics for it; it may reset, for example every night. The calculated baseload subtracts this consumption from the history. Without it, DAO stores the forecast of this load and subtracts that from the history.",
+          "x-ui-section": "Additional baseload",
+          "x-ui-widget-filter": "sensor",
+          "x-validation-hint": "Energy entity with a state_class",
+          "title": "Entity Energy"
+        }
+      },
+      "required": [
+        "name",
+        "entity forecast"
+      ],
+      "title": "AdditionalBaseloadConfig",
+      "type": "object",
+      "x-help": "# Additional baseload\n\nForecasts of loads that DAO does not control, for example an air conditioner or an appliance run that is already planned. Each forecast is added to the baseload, so the planning of the batteries and the other devices takes it into account.\n\n## Forecast\n\nEach item names a Home Assistant entity with a list of entries in one of its attributes:\n\n```yaml\nforecast:\n  - start: \"2026-11-14T18:10:00+01:00\"\n    duration: 95        # minutes\n    power: 1200         # W\n```\n\nThe entries are aligned to the intervals of the optimisation by energy: each entry adds its power times the part of its duration that falls inside an interval. Entries in the past or beyond the planning horizon are ignored. When the entity or the attribute is missing, nothing is added.\n\n## History\n\nWith a calculated baseload these loads are removed from the history, so they are not counted twice:\n- **With an energy entity**: its consumption is read from the long-term statistics of Home Assistant.\n- **Without an energy entity**: DAO stores the forecast at each optimisation and subtracts the stored values.\n",
+      "x-icon": "home-lightning-bolt",
+      "x-order": 7,
+      "x-ui-group": "Devices",
+      "x-ui-section": "Additional baseload"
+    },
     "BatteryConfig": {
       "additionalProperties": true,
       "description": "Battery configuration for optimization.",
@@ -3995,13 +4078,22 @@
       "type": "array",
       "x-ui-section": "Machines"
     },
+    "additional_baseload": {
+      "description": "Forecasts of uncontrolled loads that are added to the baseload",
+      "items": {
+        "$ref": "#/$defs/AdditionalBaseloadConfig"
+      },
+      "title": "Additional Baseload",
+      "type": "array",
+      "x-ui-section": "Additional baseload"
+    },
     "boiler": {
       "anyOf": [
         {
           "discriminator": {
             "mapping": {
-              "false": "#/$defs/BoilerDisabled",
-              "true": "#/$defs/BoilerEnabled"
+              "False": "#/$defs/BoilerDisabled",
+              "True": "#/$defs/BoilerEnabled"
             },
             "propertyName": "boiler present"
           },
@@ -4027,8 +4119,8 @@
         {
           "discriminator": {
             "mapping": {
-              "false": "#/$defs/HeatingDisabled",
-              "true": "#/$defs/HeatingEnabled"
+              "False": "#/$defs/HeatingDisabled",
+              "True": "#/$defs/HeatingEnabled"
             },
             "propertyName": "heater present"
           },

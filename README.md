@@ -34,6 +34,7 @@ In addition, it provides the extras listed below.
 | Release workflows | The version is typed once in `dao/config.yaml`, the image is built for a single architecture when that is all you need, and a manually given release tag that matches no `config.yaml` is written into it instead of stopping the build. |
 | Faster saving of the prognoses | The calculated prognoses are saved in two batched queries instead of row by row (0.2-0.3 s instead of 1.3-2.9 s), and the ML libraries are imported only when an ML solar prediction is used. |
 | Development setup | `run_dev.sh` detects and repairs a broken virtual environment; the Vite dev server works from another machine, behind a proxy and with several network addresses; troubleshooting notes in `DEVELOP.md`. |
+| Additional baseload forecasts | `additional_baseload` lists Home Assistant entities that hold a forecast of a load DAO does not control (an air conditioner, an appliance run that is already planned) as entries with a start, a duration in minutes and a power in W. DAO aligns the entries to its intervals by energy, adds them to the baseload and shows them as "Extra basisl." in the calculation chart. The calculated baseload subtracts these loads from the history: from the statistics of an optional energy entity (which needs a `state_class`), or otherwise from the forecasts DAO stores at each run. A negative hourly baseload counts as zero. See `SETTINGS.md`. |
 
 ### Fixes not in upstream
 

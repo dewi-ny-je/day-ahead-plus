@@ -29,7 +29,7 @@ from utils import (
     steps_until_cooled,
 )
 
-from dao.prog import da_calc_graph, da_task_queue
+from dao.prog import additional_baseload, da_calc_graph, da_task_queue
 from dao.prog.config.models.devices.heating import cop_temperature_factor
 from dao.prog.da_base import DaBase
 from dao.prog.da_report import Report
@@ -687,6 +687,28 @@ class DaCalc(DaBase):
             b_l = b_l[:-1]
         while len(b_l) < len(uur):
             b_l.append(b_l[-1])
+        # prognoses van niet door DAO gestuurde lasten: de energie in kWh die
+        # in iedere stap valt, voor de eerste stap vanaf het begin van de run.
+        # b_l wordt overal met interval_fraction vermenigvuldigd.
+        abl_l = [0.0] * U
+        abl_stored_entries = None
+        if self.config.additional_baseload and U > 0:
+            abl_entries, abl_stored_entries = self.get_additional_baseload_entries()
+            slot_start = [float(t) for t in ts[:U]]
+            horizon_end_ts = (
+                slot_start[-1] if U > 1 else float(start_interval_ts)
+            ) + step_s[U - 1]
+            slot_end = slot_start[1:] + [horizon_end_ts]
+            abl_l = additional_baseload.align_entries(
+                abl_entries, slot_start, slot_end
+            )
+            b_l = [b_l[u] + abl_l[u] / interval_fraction[u] for u in range(U)]
+            if not self.debug and any(
+                not item.entity_energy for item in self.config.additional_baseload
+            ):
+                self.save_additional_baseload(
+                    abl_stored_entries, start_ts, horizon_end_ts
+                )
         # p_avg1 = sum(pl) / U  # max(pl) #
         sum_w_prices = 0
         sum_w_prices_t = 0
@@ -711,6 +733,7 @@ class DaCalc(DaBase):
                         "p_l": pl,
                         "p_t": pt,
                         "base": b_l,
+                        "abl": abl_l,
                         "pv_ac": pv_org_ac,
                         "pv_dc": pv_org_dc,
                     }
@@ -5001,6 +5024,7 @@ class DaCalc(DaBase):
         accu_out_p = []
         c_t_n = []
         base_n = []
+        abl_n = []
         boiler_n = []
         heatpump_n = []
         mach_n = []
@@ -5014,7 +5038,8 @@ class DaCalc(DaBase):
         for u in range(U):
             c_t_n.append(-c_t[u].x/hour_fraction[u])
             c_l_p.append(c_l[u].x/hour_fraction[u])
-            base_n.append(-b_l[u] * interval_fraction[u] / hour_fraction[u])
+            abl_n.append(-abl_l[u] / hour_fraction[u])
+            base_n.append(-b_l[u] * interval_fraction[u] / hour_fraction[u] - abl_n[u])
             boiler_n.append(-c_b[u].x/hour_fraction[u])
             heatpump_n.append(-c_hp[u].x/hour_fraction[u])
             ev_n.append(-c_ev_sum[u]/hour_fraction[u])
@@ -5110,6 +5135,7 @@ class DaCalc(DaBase):
             "heatpump": bool(self.hp_present),
             "ev": EV > 0,
             "machines": M > 0,
+            "additional_baseload": bool(self.config.additional_baseload),
             "strategie": strategie,
             "winst": float(old_cost_da - cost.x),
             "max_y": float(max_y),
@@ -5125,6 +5151,7 @@ class DaCalc(DaBase):
                     "c_l_p": c_l_p,
                     "c_t_n": c_t_n,
                     "base_n": base_n,
+                    "abl_n": abl_n,
                     "boiler_n": boiler_n,
                     "heatpump_n": heatpump_n,
                     "ev_n": ev_n,

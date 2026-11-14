@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field
 
+from ..models.additional_baseload import AdditionalBaseloadConfig
 from ..models.base import DAOConfigBaseModel, FlexEnum, FlexFloat, SecretStr
 from ..models.dashboard import DashboardConfig
 from ..models.database import DatabaseConfig, HADatabaseConfig
@@ -263,6 +264,11 @@ class ConfigurationV0(DAOConfigBaseModel):
         default_factory=list,
         description="Appliance/machine configurations",
         json_schema_extra={"x-ui-section": "Machines"},
+    )
+    additional_baseload: list[AdditionalBaseloadConfig] = Field(
+        default_factory=list,
+        description="Forecasts of uncontrolled loads that are added to the baseload",
+        json_schema_extra={"x-ui-section": "Additional baseload"},
     )
 
     # Optional devices

@@ -344,6 +344,18 @@ class CheckDB:
                 )
                 print('Defaults for "aggregate" set on table "variabel"')
 
+        if l_version < 20261200:
+            # opgeslagen prognose van de lasten uit "additional_baseload"
+            record = [63, "abl", "Extra basislast", "kWh"]
+            self.upsert_variabel(variabel_tabel, record)
+            with self.engine.begin() as connection:
+                connection.execute(
+                    update(variabel_tabel)
+                    .where(variabel_tabel.c.id == record[0])
+                    .values(aggregate="sum")
+                )
+            print('Table "variabel" geupdated met extra basislast.')
+
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()
 

@@ -24,7 +24,7 @@ from sqlalchemy import and_, func, select
 from dao.lib.da_meteo import Meteo
 from dao.lib.da_prices import DaPrices
 from dao.lib.db_connections import make_db_da, make_db_ha
-from dao.prog import da_task_queue
+from dao.prog import additional_baseload, da_task_queue
 from dao.prog.config.loader import config_cache
 from dao.prog.production_bonus import ProductionBonus
 
@@ -394,6 +394,63 @@ class DaBase(hass.Hass):
         df_db = pd.DataFrame(rows, columns=["time", "code", "value"])
         logging.debug(f"Save calculated data:\n{df_db.to_string()}")
         self.db_da.savedata(df_db, tablename=tablename)
+
+    def get_additional_baseload_entries(self) -> tuple[list, list]:
+        """
+        Leest de prognoses van de niet door DAO gestuurde lasten uit HA
+        (instelling "additional_baseload").
+        :return: tuple (entries, stored_entries) van lijsten (start, eind,
+            vermogen in W), zie additional_baseload.parse_entries: entries van
+            alle lasten samen, stored_entries van de lasten zonder
+            energie-entiteit. Een last waarvan de prognose ontbreekt of niet te
+            lezen is, levert niets.
+        """
+        entries = []
+        stored_entries = []
+        for item in self.config.additional_baseload:
+            try:
+                data = self.get_state(item.entity_forecast).attributes[
+                    item.ha_attribute
+                ]
+            except Exception as ex:
+                logging.debug(
+                    f"Additional baseload {item.name}: geen prognose in "
+                    f"{item.entity_forecast} ({ex!r})"
+                )
+                continue
+            item_entries = additional_baseload.parse_entries(
+                data, item.ha_start_field, item.ha_duration_field, item.ha_power_field
+            )
+            logging.debug(f"Additional baseload {item.name}: {item_entries}")
+            entries += item_entries
+            if not item.entity_energy:
+                stored_entries += item_entries
+        return entries, stored_entries
+
+    def save_additional_baseload(
+        self, entries: list, start_ts: float, end_ts: float
+    ):
+        """
+        Slaat de prognose van de lasten zonder energie-entiteit op in de tabel
+        "prognoses" (code "abl"), als kWh per interval. Alle hele intervallen
+        tussen start_ts en end_ts worden geschreven, ook die zonder verbruik,
+        zodat een ingetrokken prognose wordt overschreven.
+        :param entries: lijst (start, eind, vermogen in W)
+        :param start_ts: begin van de periode, utc in seconden
+        :param end_ts: einde van de periode, utc in seconden
+        """
+        slot_start, slot_end = additional_baseload.slot_grid(
+            start_ts, end_ts, self.interval_s
+        )
+        energy = additional_baseload.align_entries(entries, slot_start, slot_end)
+        df_db = pd.DataFrame(
+            {
+                "time": [str(int(t)) for t in slot_start],
+                "code": additional_baseload.VAR_CODE,
+                "value": [round(e, 6) for e in energy],
+            }
+        )
+        self.db_da.savedata(df_db, tablename="prognoses")
 
     @staticmethod
     def get_calculated_baseload(weekday: int) -> list:
