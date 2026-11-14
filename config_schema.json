@@ -4092,8 +4092,8 @@
         {
           "discriminator": {
             "mapping": {
-              "False": "#/$defs/BoilerDisabled",
-              "True": "#/$defs/BoilerEnabled"
+              "false": "#/$defs/BoilerDisabled",
+              "true": "#/$defs/BoilerEnabled"
             },
             "propertyName": "boiler present"
           },
@@ -4119,8 +4119,8 @@
         {
           "discriminator": {
             "mapping": {
-              "False": "#/$defs/HeatingDisabled",
-              "True": "#/$defs/HeatingEnabled"
+              "false": "#/$defs/HeatingDisabled",
+              "true": "#/$defs/HeatingEnabled"
             },
             "propertyName": "heater present"
           },
