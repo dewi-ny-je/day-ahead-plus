@@ -3178,8 +3178,9 @@ class Report(DaBase):
         :param vanaf: begin van de periode
         :param tot: einde van de periode
         :return: dataframe met de kolommen "slot" (begin van het uur in utc
-            seconden) en "additional_baseload" (kWh), of None als er niets is
-            opgeslagen. Een uur zonder opgeslagen waarde heeft geen rij.
+            seconden), "tijd" (hetzelfde moment in lokale tijd) en
+            "additional_baseload" (kWh), of None als er niets is opgeslagen.
+            Een uur zonder opgeslagen waarde heeft geen rij.
         """
         df = self.db_da.get_column_data(
             "prognoses", additional_baseload.VAR_CODE, start=vanaf, end=tot
@@ -3192,6 +3193,9 @@ class Report(DaBase):
             .groupby("slot", as_index=False)["value"]
             .sum()
             .rename(columns={"value": "additional_baseload"})
+        )
+        df.insert(
+            0, "tijd", [datetime.datetime.fromtimestamp(int(s)) for s in df["slot"]]
         )
         return df
 

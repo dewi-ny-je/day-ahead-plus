@@ -19,7 +19,7 @@ import pandas as pd
 import pytz
 from hassapi.models import StateList
 from requests import get
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 
 from dao.lib.da_meteo import Meteo
 from dao.lib.da_prices import DaPrices
@@ -436,8 +436,10 @@ class DaBase(hass.Hass):
         optimalisering per uur rekent: zo komen de rijen van iedere run op
         dezelfde tijden en overschrijft een run altijd alle rijen van de vorige,
         ook na een wissel van interval. Alle hele kwartieren tussen start_ts en
-        end_ts worden geschreven, ook die zonder verbruik, zodat een
-        ingetrokken prognose wordt overschreven.
+        end_ts worden geschreven, ook die zonder verbruik, en eerder opgeslagen
+        rijen vanaf het eerste geschreven kwartier worden verwijderd. Zo blijft
+        van een ingetrokken prognose, of van een langere horizon van een
+        eerdere run, niets over.
         :param entries: lijst (start, eind, vermogen in W)
         :param start_ts: begin van de periode, utc in seconden
         :param end_ts: einde van de periode, utc in seconden
@@ -445,7 +447,10 @@ class DaBase(hass.Hass):
         slot_start, slot_end = additional_baseload.slot_grid(
             start_ts, end_ts, additional_baseload.STORE_STEP_S
         )
+        if len(slot_start) == 0:
+            return
         energy = additional_baseload.align_entries(entries, slot_start, slot_end)
+        self.delete_prognoses_from(additional_baseload.VAR_CODE, int(slot_start[0]))
         df_db = pd.DataFrame(
             {
                 "time": [str(int(t)) for t in slot_start],
@@ -454,6 +459,25 @@ class DaBase(hass.Hass):
             }
         )
         self.db_da.savedata(df_db, tablename="prognoses")
+
+    def delete_prognoses_from(self, code: str, from_ts: int):
+        """
+        Verwijdert de rijen van een code in de tabel "prognoses" vanaf een moment.
+        :param code: de code van de variabele
+        :param from_ts: utc in seconden; rijen op of na dit moment gaan weg
+        """
+        variabel = self.db_da.get_table("variabel")
+        prognoses = self.db_da.get_table("prognoses")
+        variabel_id = (
+            select(variabel.c.id).where(variabel.c.code == code).scalar_subquery()
+        )
+        with self.db_da.engine.begin() as connection:
+            connection.execute(
+                delete(prognoses).where(
+                    (prognoses.c.variabel == variabel_id)
+                    & (prognoses.c.time >= from_ts)
+                )
+            )
 
     @staticmethod
     def get_calculated_baseload(weekday: int) -> list:

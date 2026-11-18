@@ -17,6 +17,7 @@ from sqlalchemy import (
 
 from dao.lib.db_manager import DBmanagerObj
 from dao.prog import additional_baseload as abl
+from dao.prog.check_db import CheckDB
 from dao.prog.config.models.additional_baseload import AdditionalBaseloadConfig
 from dao.prog.da_base import DaBase
 from dao.prog.da_report import Report
@@ -257,6 +258,90 @@ def test_changing_the_interval_leaves_no_stale_rows(tmp_path, first, second):
     assert per_hour == pytest.approx([1.0, 0.0])
 
 
+def test_shorter_horizon_removes_the_old_tail(tmp_path):
+    base = DaBase.__new__(DaBase)
+    base.db_da = make_db_da(tmp_path)
+    base.save_additional_baseload([(T0, T0 + 3 * HOUR, 1000)], T0, T0 + 3 * HOUR)
+    base.save_additional_baseload([(T0, T0 + 3 * HOUR, 1000)], T0, T0 + HOUR)
+    with base.db_da.engine.connect() as connection:
+        times = [
+            r[0]
+            for r in connection.exec_driver_sql("SELECT time FROM prognoses")
+        ]
+    assert max(times) == T0 + 3 * QUARTER
+    assert len(times) == 4
+
+
+def test_save_keeps_the_rows_before_the_run(tmp_path):
+    base = DaBase.__new__(DaBase)
+    base.db_da = make_db_da(tmp_path)
+    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], T0, T0 + HOUR)
+    base.save_additional_baseload([], T0 + 1200, T0 + HOUR)
+    with base.db_da.engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            "SELECT time, value FROM prognoses ORDER BY time"
+        ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        (T0, 0.25),
+        (T0 + QUARTER, 0.25),
+        (T0 + 2 * QUARTER, 0.0),
+        (T0 + 3 * QUARTER, 0.0),
+    ]
+
+
+def make_variabel_db(tmp_path, rows):
+    from sqlalchemy import create_engine
+
+    engine = create_engine(f"sqlite:///{tmp_path}/v.db")
+    md = MetaData()
+    variabel = Table(
+        "variabel",
+        md,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("code", String(10), unique=True, nullable=False),
+        Column("name", String(50), unique=True, nullable=False),
+        Column("dim", String(10), nullable=False),
+        Column("aggregate", String(3), nullable=False, default="avg"),
+        sqlite_autoincrement=True,
+    )
+    md.create_all(engine)
+    if rows:
+        with engine.begin() as connection:
+            connection.execute(variabel.insert(), rows)
+    checkdb = CheckDB.__new__(CheckDB)
+    checkdb.engine = engine
+    return checkdb, variabel
+
+
+def all_variabel(checkdb):
+    with checkdb.engine.connect() as connection:
+        return {
+            tuple(r)
+            for r in connection.exec_driver_sql(
+                "SELECT id, code, aggregate FROM variabel"
+            )
+        }
+
+
+ABL = [63, "abl", "Extra basislast", "kWh"]
+
+
+def test_migration_adds_abl_with_its_id(tmp_path):
+    checkdb, variabel = make_variabel_db(tmp_path, [])
+    checkdb.add_variabel(variabel, ABL, "sum")
+    checkdb.add_variabel(variabel, ABL, "sum")
+    assert all_variabel(checkdb) == {(63, "abl", "sum")}
+
+
+def test_migration_keeps_another_variable_on_the_same_id(tmp_path):
+    other = {"id": 63, "code": "own", "name": "Own", "dim": "kWh", "aggregate": "sum"}
+    checkdb, variabel = make_variabel_db(tmp_path, [other])
+    checkdb.add_variabel(variabel, ABL, "sum")
+    rows = all_variabel(checkdb)
+    assert (63, "own", "sum") in rows
+    assert {code for _, code, _ in rows} == {"own", "abl"}
+
+
 def make_report(tmp_path, with_sum=True):
     """A Report on two SQLite databases, with one grid sensor."""
     db_ha = DBmanagerObj("sqlite", "ha.db", db_path=str(tmp_path))
@@ -382,6 +467,23 @@ def test_stored_forecast_is_subtracted_per_hour(tmp_path):
             )
     baseload = report.calc_weekday_baseload(yesterday().weekday())
     assert baseload[:4] == pytest.approx([1.6, 2.0, 1.7, 2.0])
+
+
+def test_stored_forecast_has_local_and_utc_hours(tmp_path):
+    report, _ = make_report(tmp_path)
+    start = yesterday().timestamp()
+    with report.db_da.engine.begin() as connection:
+        for q in range(5):
+            connection.exec_driver_sql(
+                "INSERT INTO prognoses (variabel, time, value) VALUES (63, ?, 0.1)",
+                (int(start + q * QUARTER),),
+            )
+    df = report.get_stored_additional_baseload(
+        yesterday(), yesterday() + dt.timedelta(days=1)
+    )
+    assert list(df["slot"]) == [start, start + HOUR]
+    assert list(df["tijd"]) == [yesterday(), yesterday() + dt.timedelta(hours=1)]
+    assert list(df["additional_baseload"]) == pytest.approx([0.4, 0.1])
 
 
 def test_negative_baseload_is_clamped(tmp_path):

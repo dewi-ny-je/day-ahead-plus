@@ -77,6 +77,36 @@ class CheckDB:
             connection.execute(query)
             connection.commit()
 
+    def add_variabel(self, variabel_table, record, aggregate: str):
+        """
+        Voegt een variabele toe, of werkt hem bij als zijn code al bestaat. Is
+        het id van record al van een andere code, dan kiest de database een
+        vrij id, zodat de rijen van die andere code bij hun eigen variabele
+        blijven.
+        :param variabel_table: de tabel "variabel"
+        :param record: [id, code, naam, dimensie]
+        :param aggregate: "sum" of "avg"
+        """
+        var_id, code, name, dim = record
+        with self.engine.begin() as connection:
+            by_code = connection.execute(
+                select(variabel_table.c.id).where(variabel_table.c.code == code)
+            ).first()
+            by_id = connection.execute(
+                select(variabel_table.c.code).where(variabel_table.c.id == var_id)
+            ).first()
+            values = {"code": code, "name": name, "dim": dim, "aggregate": aggregate}
+            if by_code is not None:
+                connection.execute(
+                    update(variabel_table)
+                    .where(variabel_table.c.id == by_code.id)
+                    .values(**values)
+                )
+            elif by_id is None:
+                connection.execute(insert(variabel_table).values(id=var_id, **values))
+            else:
+                connection.execute(insert(variabel_table).values(**values))
+
     def get_all_var_data(
         self,
         tablename: str,
@@ -345,15 +375,9 @@ class CheckDB:
                 print('Defaults for "aggregate" set on table "variabel"')
 
         if l_version < 20261200:
-            # opgeslagen prognose van de lasten uit "additional_baseload"
-            record = [63, "abl", "Extra basislast", "kWh"]
-            self.upsert_variabel(variabel_tabel, record)
-            with self.engine.begin() as connection:
-                connection.execute(
-                    update(variabel_tabel)
-                    .where(variabel_tabel.c.id == record[0])
-                    .values(aggregate="sum")
-                )
+            # opgeslagen prognose van de lasten uit "additional_baseload";
+            # na het aanmaken van de kolom "aggregate" hierboven
+            self.add_variabel(variabel_tabel, [63, "abl", "Extra basislast", "kWh"], "sum")
             print('Table "variabel" geupdated met extra basislast.')
 
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
