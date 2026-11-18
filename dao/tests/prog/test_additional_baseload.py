@@ -221,7 +221,7 @@ def make_db_da(tmp_path):
 def test_save_writes_whole_slots_and_latest_forecast_wins(tmp_path):
     base = DaBase.__new__(DaBase)
     base.db_da = make_db_da(tmp_path)
-    base.interval_s = QUARTER
+    base.interval_s = HOUR
     run = (T0 + 300, T0 + HOUR)
     base.save_additional_baseload([(T0, T0 + HOUR, 1000)], *run)
     # the forecast is withdrawn for the last quarter
@@ -235,6 +235,26 @@ def test_save_writes_whole_slots_and_latest_forecast_wins(tmp_path):
         (T0 + 2 * QUARTER, 0.25),
         (T0 + 3 * QUARTER, 0.0),
     ]
+
+
+@pytest.mark.parametrize("first, second", [(QUARTER, HOUR), (HOUR, QUARTER)])
+def test_changing_the_interval_leaves_no_stale_rows(tmp_path, first, second):
+    base = DaBase.__new__(DaBase)
+    base.db_da = make_db_da(tmp_path)
+    run = (T0, T0 + 2 * HOUR)
+    base.interval_s = first
+    base.save_additional_baseload([(T0, T0 + 2 * HOUR, 1000)], *run)
+    base.interval_s = second
+    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], *run)
+    with base.db_da.engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            "SELECT time, value FROM prognoses ORDER BY time"
+        ).fetchall()
+    per_hour = [
+        sum(value for time, value in rows if T0 + h * HOUR <= time < T0 + (h + 1) * HOUR)
+        for h in range(2)
+    ]
+    assert per_hour == pytest.approx([1.0, 0.0])
 
 
 def make_report(tmp_path, with_sum=True):

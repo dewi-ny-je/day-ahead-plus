@@ -13,6 +13,9 @@ import pandas as pd
 
 # code of the stored forecast in the table "variabel"
 VAR_CODE = "abl"
+# length in seconds of the intervals in which the forecast is stored,
+# independent of the interval of the optimisation
+STORE_STEP_S = 900
 
 
 def _start_ts(value) -> float:

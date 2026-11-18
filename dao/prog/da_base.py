@@ -432,15 +432,18 @@ class DaBase(hass.Hass):
     ):
         """
         Slaat de prognose van de lasten zonder energie-entiteit op in de tabel
-        "prognoses" (code "abl"), als kWh per interval. Alle hele intervallen
-        tussen start_ts en end_ts worden geschreven, ook die zonder verbruik,
-        zodat een ingetrokken prognose wordt overschreven.
+        "prognoses" (code "abl"), als kWh per kwartier, ook als de
+        optimalisering per uur rekent: zo komen de rijen van iedere run op
+        dezelfde tijden en overschrijft een run altijd alle rijen van de vorige,
+        ook na een wissel van interval. Alle hele kwartieren tussen start_ts en
+        end_ts worden geschreven, ook die zonder verbruik, zodat een
+        ingetrokken prognose wordt overschreven.
         :param entries: lijst (start, eind, vermogen in W)
         :param start_ts: begin van de periode, utc in seconden
         :param end_ts: einde van de periode, utc in seconden
         """
         slot_start, slot_end = additional_baseload.slot_grid(
-            start_ts, end_ts, self.interval_s
+            start_ts, end_ts, additional_baseload.STORE_STEP_S
         )
         energy = additional_baseload.align_entries(entries, slot_start, slot_end)
         df_db = pd.DataFrame(
