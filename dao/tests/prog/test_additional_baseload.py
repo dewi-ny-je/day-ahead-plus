@@ -5,6 +5,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+from hassapi.exceptions import NotFound
 from sqlalchemy import (
     Column,
     Double,
@@ -165,10 +166,32 @@ def make_base(states: dict, items: list):
     )
 
     def get_state(entity):
+        if entity not in states:
+            raise NotFound(f"states/{entity}")
         return SimpleNamespace(attributes=states[entity])
 
     base.get_state = get_state
     return base
+
+
+def test_read_error_warns_and_missing_attribute_does_not(caplog):
+    base = make_base(
+        {"sensor.idle": {"friendly_name": "idle"}},
+        [
+            {"name": "idle", "entity forecast": "sensor.idle"},
+            {"name": "gone", "entity forecast": "sensor.gone"},
+        ],
+    )
+    with caplog.at_level(logging.DEBUG):
+        assert base.get_additional_baseload_entries() == ([], [])
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "sensor.gone" in warnings[0]
+    assert any(
+        "sensor.idle" in r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.DEBUG
+    )
 
 
 def test_entries_of_items_with_and_without_energy_entity():

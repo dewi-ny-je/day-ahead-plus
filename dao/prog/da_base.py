@@ -403,19 +403,27 @@ class DaBase(hass.Hass):
             vermogen in W), zie additional_baseload.parse_entries: entries van
             alle lasten samen, stored_entries van de lasten zonder
             energie-entiteit. Een last waarvan de prognose ontbreekt of niet te
-            lezen is, levert niets.
+            lezen is, levert niets. Een entiteit die Home Assistant niet kan
+            leveren geeft een waarschuwing; een ontbrekend attribuut, het
+            gewone geval als er niets gepland is, alleen een debug-regel.
         """
         entries = []
         stored_entries = []
         for item in self.config.additional_baseload:
             try:
-                data = self.get_state(item.entity_forecast).attributes[
-                    item.ha_attribute
-                ]
+                state = self.get_state(item.entity_forecast)
             except Exception as ex:
+                logging.warning(
+                    f"Additional baseload {item.name}: {item.entity_forecast} "
+                    f"kan niet uit Home Assistant worden gelezen ({ex!r}); "
+                    f"de berekening gaat verder zonder deze last"
+                )
+                continue
+            data = (state.attributes or {}).get(item.ha_attribute)
+            if data is None:
                 logging.debug(
-                    f"Additional baseload {item.name}: geen prognose in "
-                    f"{item.entity_forecast} ({ex!r})"
+                    f"Additional baseload {item.name}: geen attribuut "
+                    f"'{item.ha_attribute}' in {item.entity_forecast}"
                 )
                 continue
             item_entries = additional_baseload.parse_entries(
