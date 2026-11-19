@@ -18,15 +18,19 @@ VAR_CODE = "abl"
 STORE_STEP_S = 900
 
 
-def _start_ts(value) -> float:
+def _start_ts(value, time_zone: str | None = None) -> float:
     """
     :param value: date and time of the start of an entry: a datetime or a text
-        (ISO 8601). Without a time zone it is taken as local time.
+        (ISO 8601)
+    :param time_zone: IANA time zone for a start without a time zone; without
+        it, such a start is taken as local time of the process
     :return: the start as a unix timestamp
     """
     moment = pd.Timestamp(value)
     if moment is pd.NaT:
         raise ValueError(f"no date and time: {value!r}")
+    if moment.tzinfo is None and time_zone:
+        moment = moment.tz_localize(time_zone, ambiguous=True, nonexistent="shift_forward")
     return moment.to_pydatetime().timestamp()
 
 
@@ -45,7 +49,11 @@ def _duration_s(value) -> float:
 
 
 def parse_entries(
-    data, start_field: str, duration_field: str, power_field: str
+    data,
+    start_field: str,
+    duration_field: str,
+    power_field: str,
+    time_zone: str | None = None,
 ) -> list[tuple[float, float, float]]:
     """
     Reads the entries of a forecast.
@@ -53,6 +61,8 @@ def parse_entries(
     :param start_field: key of the start time
     :param duration_field: key of the duration
     :param power_field: key of the power in W
+    :param time_zone: IANA time zone for starts without a time zone, see
+        _start_ts
     :return: list of (start, end, power): start and end as unix timestamps,
         power in W. Entries that miss a field, cannot be read or have no
         positive duration and power are left out.
@@ -62,7 +72,7 @@ def parse_entries(
         return entries
     for entry in data:
         try:
-            start = _start_ts(entry[start_field])
+            start = _start_ts(entry[start_field], time_zone)
             duration = _duration_s(entry[duration_field])
             power = float(entry[power_field])
         except (KeyError, TypeError, ValueError) as ex:

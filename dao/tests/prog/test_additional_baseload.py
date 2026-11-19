@@ -171,6 +171,7 @@ def make_base(states: dict, items: list):
         return SimpleNamespace(attributes=states[entity])
 
     base.get_state = get_state
+    base.time_zone = None  # starts without a zone in process time, like T0
     return base
 
 
@@ -183,7 +184,7 @@ def test_read_error_warns_and_missing_attribute_does_not(caplog):
         ],
     )
     with caplog.at_level(logging.DEBUG):
-        assert base.get_additional_baseload_entries() == ([], [])
+        assert base.get_additional_baseload_entries() == ([], None)
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "sensor.gone" in warnings[0]
@@ -192,6 +193,40 @@ def test_read_error_warns_and_missing_attribute_does_not(caplog):
         for r in caplog.records
         if r.levelno == logging.DEBUG
     )
+
+
+def test_read_error_of_a_stored_item_keeps_the_stored_forecast():
+    entry = {"start": "2026-01-05T12:00:00", "duration": 30, "power": 1000}
+    base = make_base(
+        {"sensor.a": {"forecast": [entry]}},
+        [
+            {"name": "a", "entity forecast": "sensor.a"},
+            {"name": "gone", "entity forecast": "sensor.gone"},
+        ],
+    )
+    entries, stored = base.get_additional_baseload_entries()
+    assert entries == [(T0, T0 + 1800, 1000.0)]
+    assert stored is None
+
+
+def test_read_error_of_an_item_with_energy_entity_still_stores():
+    base = make_base(
+        {},
+        [{"name": "e", "entity forecast": "sensor.e", "entity energy": "sensor.kwh"}],
+    )
+    assert base.get_additional_baseload_entries() == ([], [])
+
+
+def test_naive_start_uses_the_home_assistant_time_zone():
+    entries = abl.parse_entries(
+        [{"start": "2026-01-05T12:00:00", "duration": 15, "power": 100}],
+        "start",
+        "duration",
+        "power",
+        "America/New_York",
+    )
+    expected = dt.datetime(2026, 1, 5, 17, 0, tzinfo=dt.UTC).timestamp()
+    assert entries[0][0] == expected
 
 
 def test_entries_of_items_with_and_without_energy_entity():
@@ -207,7 +242,6 @@ def test_entries_of_items_with_and_without_energy_entity():
             {"name": "a", "entity forecast": "sensor.a", "entity energy": "sensor.e"},
             {"name": "b", "entity forecast": "sensor.b", "ha attribute": "runs"},
             {"name": "c", "entity forecast": "sensor.c"},  # no attribute
-            {"name": "d", "entity forecast": "sensor.d"},  # no entity
         ],
     )
     entries, stored = base.get_additional_baseload_entries()

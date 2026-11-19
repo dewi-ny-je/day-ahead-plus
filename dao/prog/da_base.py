@@ -19,7 +19,7 @@ import pandas as pd
 import pytz
 from hassapi.models import StateList
 from requests import get
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, insert, select
 
 from dao.lib.da_meteo import Meteo
 from dao.lib.da_prices import DaPrices
@@ -406,18 +406,27 @@ class DaBase(hass.Hass):
             lezen is, levert niets. Een entiteit die Home Assistant niet kan
             leveren geeft een waarschuwing; een ontbrekend attribuut, het
             gewone geval als er niets gepland is, alleen een debug-regel.
+            stored_entries is None als de entiteit van een last zonder
+            energie-entiteit niet te lezen was: de opgeslagen prognose moet
+            dan blijven staan. Tijden zonder tijdzone gelden in de tijdzone
+            van Home Assistant.
         """
         entries = []
         stored_entries = []
+        read_failed = False
         for item in self.config.additional_baseload:
             try:
                 state = self.get_state(item.entity_forecast)
+                if state is None:
+                    raise ValueError("geen state")
             except Exception as ex:
                 logging.warning(
                     f"Additional baseload {item.name}: {item.entity_forecast} "
                     f"kan niet uit Home Assistant worden gelezen ({ex!r}); "
                     f"de berekening gaat verder zonder deze last"
                 )
+                if not item.entity_energy:
+                    read_failed = True
                 continue
             data = (state.attributes or {}).get(item.ha_attribute)
             if data is None:
@@ -427,13 +436,17 @@ class DaBase(hass.Hass):
                 )
                 continue
             item_entries = additional_baseload.parse_entries(
-                data, item.ha_start_field, item.ha_duration_field, item.ha_power_field
+                data,
+                item.ha_start_field,
+                item.ha_duration_field,
+                item.ha_power_field,
+                self.time_zone,
             )
             logging.debug(f"Additional baseload {item.name}: {item_entries}")
             entries += item_entries
             if not item.entity_energy:
                 stored_entries += item_entries
-        return entries, stored_entries
+        return entries, None if read_failed else stored_entries
 
     def save_additional_baseload(
         self, entries: list, start_ts: float, end_ts: float
@@ -445,9 +458,10 @@ class DaBase(hass.Hass):
         dezelfde tijden en overschrijft een run altijd alle rijen van de vorige,
         ook na een wissel van interval. Alle hele kwartieren tussen start_ts en
         end_ts worden geschreven, ook die zonder verbruik, en eerder opgeslagen
-        rijen vanaf het eerste geschreven kwartier worden verwijderd. Zo blijft
-        van een ingetrokken prognose, of van een langere horizon van een
-        eerdere run, niets over.
+        rijen vanaf het eerste geschreven kwartier worden verwijderd, in
+        dezelfde transactie. Zo blijft van een ingetrokken prognose, of van een
+        langere horizon van een eerdere run, niets over, en blijft bij een fout
+        de vorige prognose staan.
         :param entries: lijst (start, eind, vermogen in W)
         :param start_ts: begin van de periode, utc in seconden
         :param end_ts: einde van de periode, utc in seconden
@@ -458,33 +472,31 @@ class DaBase(hass.Hass):
         if len(slot_start) == 0:
             return
         energy = additional_baseload.align_entries(entries, slot_start, slot_end)
-        self.delete_prognoses_from(additional_baseload.VAR_CODE, int(slot_start[0]))
-        df_db = pd.DataFrame(
-            {
-                "time": [str(int(t)) for t in slot_start],
-                "code": additional_baseload.VAR_CODE,
-                "value": [round(e, 6) for e in energy],
-            }
-        )
-        self.db_da.savedata(df_db, tablename="prognoses")
-
-    def delete_prognoses_from(self, code: str, from_ts: int):
-        """
-        Verwijdert de rijen van een code in de tabel "prognoses" vanaf een moment.
-        :param code: de code van de variabele
-        :param from_ts: utc in seconden; rijen op of na dit moment gaan weg
-        """
         variabel = self.db_da.get_table("variabel")
         prognoses = self.db_da.get_table("prognoses")
-        variabel_id = (
-            select(variabel.c.id).where(variabel.c.code == code).scalar_subquery()
-        )
         with self.db_da.engine.begin() as connection:
+            variabel_id = connection.execute(
+                select(variabel.c.id).where(
+                    variabel.c.code == additional_baseload.VAR_CODE
+                )
+            ).scalar()
+            if variabel_id is None:
+                logging.error(
+                    f"Onbekende code opslaan data: {additional_baseload.VAR_CODE}"
+                )
+                return
             connection.execute(
                 delete(prognoses).where(
                     (prognoses.c.variabel == variabel_id)
-                    & (prognoses.c.time >= from_ts)
+                    & (prognoses.c.time >= int(slot_start[0]))
                 )
+            )
+            connection.execute(
+                insert(prognoses),
+                [
+                    {"variabel": variabel_id, "time": int(t), "value": round(e, 6)}
+                    for t, e in zip(slot_start, energy, strict=True)
+                ],
             )
 
     @staticmethod

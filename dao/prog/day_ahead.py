@@ -703,8 +703,13 @@ class DaCalc(DaBase):
                 abl_entries, slot_start, slot_end
             )
             b_l = [b_l[u] + abl_l[u] / interval_fraction[u] for u in range(U)]
-            if not self.debug and any(
-                not item.entity_energy for item in self.config.additional_baseload
+            if (
+                not self.debug
+                and abl_stored_entries is not None
+                and any(
+                    not item.entity_energy
+                    for item in self.config.additional_baseload
+                )
             ):
                 self.save_additional_baseload(
                     abl_stored_entries, start_ts, horizon_end_ts
