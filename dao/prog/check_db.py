@@ -19,6 +19,7 @@ from sqlalchemy import (
     and_,
     delete,
     desc,
+    func,
     insert,
     inspect,
     literal,
@@ -80,8 +81,8 @@ class CheckDB:
     def add_variabel(self, variabel_table, record, aggregate: str):
         """
         Voegt een variabele toe, of werkt hem bij als zijn code al bestaat. Is
-        het id van record al van een andere code, dan kiest de database een
-        vrij id, zodat de rijen van die andere code bij hun eigen variabele
+        het id van record al van een andere code, dan krijgt de variabele het
+        hoogste id plus een, zodat de rijen van die andere code bij hun eigen variabele
         blijven.
         :param variabel_table: de tabel "variabel"
         :param record: [id, code, naam, dimensie]
@@ -105,7 +106,12 @@ class CheckDB:
             elif by_id is None:
                 connection.execute(insert(variabel_table).values(id=var_id, **values))
             else:
-                connection.execute(insert(variabel_table).values(**values))
+                free_id = connection.execute(
+                    select(func.max(variabel_table.c.id))
+                ).scalar()
+                connection.execute(
+                    insert(variabel_table).values(id=free_id + 1, **values)
+                )
 
     def get_all_var_data(
         self,

@@ -419,6 +419,8 @@ class DaBase(hass.Hass):
                 state = self.get_state(item.entity_forecast)
                 if state is None:
                     raise ValueError("geen state")
+                if state.state in ("unavailable", "unknown"):
+                    raise ValueError(f"state {state.state}")
             except Exception as ex:
                 logging.warning(
                     f"Additional baseload {item.name}: {item.entity_forecast} "
@@ -461,7 +463,9 @@ class DaBase(hass.Hass):
         rijen vanaf het eerste geschreven kwartier worden verwijderd, in
         dezelfde transactie. Zo blijft van een ingetrokken prognose, of van een
         langere horizon van een eerdere run, niets over, en blijft bij een fout
-        de vorige prognose staan.
+        de vorige prognose staan. Het kwartier waarin start_ts valt houdt zijn
+        opgeslagen waarde; heeft het er nog geen, dan krijgt het de energie
+        van start_ts tot het einde van dat kwartier.
         :param entries: lijst (start, eind, vermogen in W)
         :param start_ts: begin van de periode, utc in seconden
         :param end_ts: einde van de periode, utc in seconden
@@ -485,19 +489,37 @@ class DaBase(hass.Hass):
                     f"Onbekende code opslaan data: {additional_baseload.VAR_CODE}"
                 )
                 return
+            rows = [
+                {"variabel": variabel_id, "time": int(t), "value": round(e, 6)}
+                for t, e in zip(slot_start, energy, strict=True)
+            ]
+            current = int(slot_start[0]) - additional_baseload.STORE_STEP_S
+            if start_ts < slot_start[0]:
+                stored = connection.execute(
+                    select(prognoses.c.time).where(
+                        (prognoses.c.variabel == variabel_id)
+                        & (prognoses.c.time == current)
+                    )
+                ).first()
+                if stored is None:
+                    rest = additional_baseload.align_entries(
+                        entries, [start_ts], [slot_start[0]]
+                    )[0]
+                    rows.insert(
+                        0,
+                        {
+                            "variabel": variabel_id,
+                            "time": current,
+                            "value": round(rest, 6),
+                        },
+                    )
             connection.execute(
                 delete(prognoses).where(
                     (prognoses.c.variabel == variabel_id)
                     & (prognoses.c.time >= int(slot_start[0]))
                 )
             )
-            connection.execute(
-                insert(prognoses),
-                [
-                    {"variabel": variabel_id, "time": int(t), "value": round(e, 6)}
-                    for t, e in zip(slot_start, energy, strict=True)
-                ],
-            )
+            connection.execute(insert(prognoses), rows)
 
     @staticmethod
     def get_calculated_baseload(weekday: int) -> list:

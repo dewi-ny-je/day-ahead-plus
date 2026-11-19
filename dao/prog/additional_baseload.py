@@ -6,6 +6,7 @@ power. The entries are aligned to time slots by energy: each entry adds its
 power times the part of its duration that falls inside a slot.
 """
 
+import bisect
 import logging
 import math
 
@@ -95,17 +96,20 @@ def align_entries(
     """
     Aligns forecast entries to time slots by energy.
     :param entries: list of (start, end, power) as returned by parse_entries
-    :param slot_start: unix timestamp of the start of each slot
-    :param slot_end: unix timestamp of the end of each slot
+    :param slot_start: unix timestamp of the start of each slot, ascending
+    :param slot_end: unix timestamp of the end of each slot, ascending; slots
+        do not overlap
     :return: the energy in kWh of the entries in each slot. Entries, or parts
         of them, outside the slots add nothing.
     """
     energy = [0.0] * len(slot_start)
     for start, end, power in entries:
-        for u in range(len(slot_start)):
+        u = bisect.bisect_right(slot_end, start)
+        while u < len(slot_start) and slot_start[u] < end:
             overlap = min(end, slot_end[u]) - max(start, slot_start[u])
             if overlap > 0:
                 energy[u] += power * overlap / 3_600_000
+            u += 1
     return energy
 
 

@@ -158,6 +158,31 @@ def test_config_item_aliases_and_defaults():
     )
 
 
+def test_alignment_matches_full_overlap_sum_on_a_mixed_grid():
+    # quarters for two hours, then hours
+    slot_start = [T0 + i * QUARTER for i in range(8)] + [
+        T0 + 2 * HOUR + i * HOUR for i in range(4)
+    ]
+    slot_end = [t + QUARTER for t in slot_start[:8]] + [
+        t + HOUR for t in slot_start[8:]
+    ]
+    entries = [
+        (T0 - HOUR, T0 + 100, 500),
+        (T0 + 1000, T0 + 1100, 3000),
+        (T0 + 7000, T0 + 4 * HOUR + 50, 800),
+        (T0 + 9 * HOUR, T0 + 10 * HOUR, 900),
+        (T0 - 2 * HOUR, T0 - HOUR, 900),
+    ]
+    expected = [
+        sum(
+            p * max(0, min(e, slot_end[u]) - max(s, slot_start[u])) / 3_600_000
+            for s, e, p in entries
+        )
+        for u in range(len(slot_start))
+    ]
+    assert abl.align_entries(entries, slot_start, slot_end) == pytest.approx(expected)
+
+
 # ----------------------------------------------------- reading the forecast
 def make_base(states: dict, items: list):
     base = DaBase.__new__(DaBase)
@@ -168,7 +193,10 @@ def make_base(states: dict, items: list):
     def get_state(entity):
         if entity not in states:
             raise NotFound(f"states/{entity}")
-        return SimpleNamespace(attributes=states[entity])
+        attributes = dict(states[entity])
+        return SimpleNamespace(
+            state=attributes.pop("_state", "1"), attributes=attributes
+        )
 
     base.get_state = get_state
     base.time_zone = None  # starts without a zone in process time, like T0
@@ -207,6 +235,17 @@ def test_read_error_of_a_stored_item_keeps_the_stored_forecast():
     entries, stored = base.get_additional_baseload_entries()
     assert entries == [(T0, T0 + 1800, 1000.0)]
     assert stored is None
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown"])
+def test_unavailable_forecast_keeps_the_stored_forecast(caplog, state):
+    base = make_base(
+        {"sensor.a": {"_state": state}},
+        [{"name": "a", "entity forecast": "sensor.a"}],
+    )
+    with caplog.at_level(logging.WARNING):
+        assert base.get_additional_baseload_entries() == ([], None)
+    assert any("sensor.a" in r.getMessage() for r in caplog.records)
 
 
 def test_read_error_of_an_item_with_energy_entity_still_stores():
@@ -289,9 +328,27 @@ def test_save_writes_whole_slots_and_latest_forecast_wins(tmp_path):
             "SELECT time, value FROM prognoses ORDER BY time"
         ).fetchall()
     assert [tuple(r) for r in rows] == [
+        (T0, round(1000 * 600 / 3_600_000, 6)),  # rest of the first quarter
         (T0 + QUARTER, 0.25),
         (T0 + 2 * QUARTER, 0.25),
         (T0 + 3 * QUARTER, 0.0),
+    ]
+
+
+def test_current_quarter_keeps_its_stored_value(tmp_path):
+    base = DaBase.__new__(DaBase)
+    base.db_da = make_db_da(tmp_path)
+    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], T0, T0 + HOUR)
+    base.save_additional_baseload([(T0, T0 + HOUR, 2000)], T0 + 300, T0 + HOUR)
+    with base.db_da.engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            "SELECT time, value FROM prognoses ORDER BY time"
+        ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        (T0, 0.25),
+        (T0 + QUARTER, 0.5),
+        (T0 + 2 * QUARTER, 0.5),
+        (T0 + 3 * QUARTER, 0.5),
     ]
 
 
@@ -397,6 +454,16 @@ def test_migration_keeps_another_variable_on_the_same_id(tmp_path):
     rows = all_variabel(checkdb)
     assert (63, "own", "sum") in rows
     assert {code for _, code, _ in rows} == {"own", "abl"}
+
+
+def test_migration_takes_the_next_id_after_the_highest(tmp_path):
+    rows = [
+        {"id": i, "code": c, "name": c, "dim": "kWh", "aggregate": "sum"}
+        for i, c in ((63, "own"), (70, "high"))
+    ]
+    checkdb, variabel = make_variabel_db(tmp_path, rows)
+    checkdb.add_variabel(variabel, ABL, "sum")
+    assert (71, "abl", "sum") in all_variabel(checkdb)
 
 
 def make_report(tmp_path, with_sum=True):
