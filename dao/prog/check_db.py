@@ -83,7 +83,9 @@ class CheckDB:
         Voegt een variabele toe, of werkt hem bij als zijn code al bestaat. Is
         het id van record al van een andere code, dan krijgt de variabele het
         hoogste id plus een, zodat de rijen van die andere code bij hun eigen variabele
-        blijven.
+        blijven. Is de naam, die uniek moet zijn, al van een andere code, dan
+        krijgt de variabele de naam met de code erachter, bijvoorbeeld
+        "Extra basislast (abl)".
         :param variabel_table: de tabel "variabel"
         :param record: [id, code, naam, dimensie]
         :param aggregate: "sum" of "avg"
@@ -96,6 +98,13 @@ class CheckDB:
             by_id = connection.execute(
                 select(variabel_table.c.code).where(variabel_table.c.id == var_id)
             ).first()
+            name_taken = connection.execute(
+                select(variabel_table.c.id).where(
+                    (variabel_table.c.name == name) & (variabel_table.c.code != code)
+                )
+            ).first()
+            if name_taken is not None:
+                name = f"{name} ({code})"
             values = {"code": code, "name": name, "dim": dim, "aggregate": aggregate}
             if by_code is not None:
                 connection.execute(

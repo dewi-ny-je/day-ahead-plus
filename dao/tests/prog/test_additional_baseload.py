@@ -456,6 +456,20 @@ def test_migration_keeps_another_variable_on_the_same_id(tmp_path):
     assert {code for _, code, _ in rows} == {"own", "abl"}
 
 
+def test_migration_avoids_a_name_of_another_variable(tmp_path):
+    other = {
+        "id": 70, "code": "own", "name": "Extra basislast", "dim": "kWh", "aggregate": "sum"
+    }
+    checkdb, variabel = make_variabel_db(tmp_path, [other])
+    checkdb.add_variabel(variabel, ABL, "sum")
+    checkdb.add_variabel(variabel, ABL, "sum")
+    with checkdb.engine.connect() as connection:
+        names = dict(
+            connection.exec_driver_sql("SELECT code, name FROM variabel").fetchall()
+        )
+    assert names == {"own": "Extra basislast", "abl": "Extra basislast (abl)"}
+
+
 def test_migration_takes_the_next_id_after_the_highest(tmp_path):
     rows = [
         {"id": i, "code": c, "name": c, "dim": "kWh", "aggregate": "sum"}
