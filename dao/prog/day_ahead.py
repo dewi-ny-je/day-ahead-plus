@@ -29,7 +29,7 @@ from utils import (
     steps_until_cooled,
 )
 
-from dao.prog import additional_baseload, da_calc_graph, da_task_queue
+from dao.prog import da_calc_graph, da_task_queue, known_loads
 from dao.prog.config.models.devices.heating import cop_temperature_factor
 from dao.prog.da_base import DaBase
 from dao.prog.da_report import Report
@@ -687,19 +687,19 @@ class DaCalc(DaBase):
             b_l = b_l[:-1]
         while len(b_l) < len(uur):
             b_l.append(b_l[-1])
-        # prognoses van niet door DAO gestuurde lasten: de energie in kWh die
+        # prognoses van de bekende lasten (niet door DAO gestuurd): de energie in kWh die
         # in iedere stap valt, voor de eerste stap vanaf het begin van de run.
         # b_l wordt overal met interval_fraction vermenigvuldigd.
         abl_l = [0.0] * U
         abl_stored_entries = None
-        if self.config.additional_baseload and U > 0:
-            abl_entries, abl_stored_entries = self.get_additional_baseload_entries()
+        if self.config.known_loads and U > 0:
+            abl_entries, abl_stored_entries = self.get_known_loads_entries()
             slot_start = [float(t) for t in ts[:U]]
             horizon_end_ts = (
                 slot_start[-1] if U > 1 else float(start_interval_ts)
             ) + step_s[U - 1]
             slot_end = slot_start[1:] + [horizon_end_ts]
-            abl_l = additional_baseload.align_entries(
+            abl_l = known_loads.align_entries(
                 abl_entries, slot_start, slot_end
             )
             b_l = [b_l[u] + abl_l[u] / interval_fraction[u] for u in range(U)]
@@ -708,10 +708,10 @@ class DaCalc(DaBase):
                 and abl_stored_entries is not None
                 and any(
                     not item.entity_energy
-                    for item in self.config.additional_baseload
+                    for item in self.config.known_loads
                 )
             ):
-                self.save_additional_baseload(
+                self.save_known_loads(
                     abl_stored_entries, start_ts, horizon_end_ts
                 )
         # p_avg1 = sum(pl) / U  # max(pl) #
@@ -5149,7 +5149,7 @@ class DaCalc(DaBase):
             "heatpump": bool(self.hp_present),
             "ev": EV > 0,
             "machines": M > 0,
-            "additional_baseload": bool(self.config.additional_baseload),
+            "known_loads": bool(self.config.known_loads),
             "strategie": strategie,
             "winst": float(old_cost_da - cost.x),
             "max_y": float(max_y),

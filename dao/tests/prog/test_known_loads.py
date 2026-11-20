@@ -1,4 +1,4 @@
-"""Forecasts of uncontrolled loads (additional_baseload)."""
+"""Forecasts of uncontrolled loads (known_loads)."""
 
 import datetime as dt
 import logging
@@ -17,9 +17,9 @@ from sqlalchemy import (
 )
 
 from dao.lib.db_manager import DBmanagerObj
-from dao.prog import additional_baseload as abl
+from dao.prog import known_loads as abl
 from dao.prog.check_db import CheckDB
-from dao.prog.config.models.additional_baseload import AdditionalBaseloadConfig
+from dao.prog.config.models.known_loads import KnownLoadConfig
 from dao.prog.da_base import DaBase
 from dao.prog.da_report import Report
 
@@ -134,7 +134,7 @@ def test_slot_grid_holds_whole_slots_only():
 
 # ------------------------------------------------------------------ config
 def test_config_item_aliases_and_defaults():
-    item = AdditionalBaseloadConfig.model_validate(
+    item = KnownLoadConfig.model_validate(
         {
             "name": "Airco",
             "entity forecast": "sensor.airco_forecast",
@@ -151,7 +151,7 @@ def test_config_item_aliases_and_defaults():
     )
     assert item.ha_power_field == "watt"
     assert (
-        AdditionalBaseloadConfig.model_validate(
+        KnownLoadConfig.model_validate(
             {"name": "Vaatwasser", "entity forecast": "sensor.vw"}
         ).entity_energy
         is None
@@ -187,7 +187,7 @@ def test_alignment_matches_full_overlap_sum_on_a_mixed_grid():
 def make_base(states: dict, items: list):
     base = DaBase.__new__(DaBase)
     base.config = SimpleNamespace(
-        additional_baseload=[AdditionalBaseloadConfig.model_validate(i) for i in items]
+        known_loads=[KnownLoadConfig.model_validate(i) for i in items]
     )
 
     def get_state(entity):
@@ -212,7 +212,7 @@ def test_read_error_warns_and_missing_attribute_does_not(caplog):
         ],
     )
     with caplog.at_level(logging.DEBUG):
-        assert base.get_additional_baseload_entries() == ([], None)
+        assert base.get_known_loads_entries() == ([], None)
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "sensor.gone" in warnings[0]
@@ -232,7 +232,7 @@ def test_read_error_of_a_stored_item_keeps_the_stored_forecast():
             {"name": "gone", "entity forecast": "sensor.gone"},
         ],
     )
-    entries, stored = base.get_additional_baseload_entries()
+    entries, stored = base.get_known_loads_entries()
     assert entries == [(T0, T0 + 1800, 1000.0)]
     assert stored is None
 
@@ -244,7 +244,7 @@ def test_unavailable_forecast_keeps_the_stored_forecast(caplog, state):
         [{"name": "a", "entity forecast": "sensor.a"}],
     )
     with caplog.at_level(logging.WARNING):
-        assert base.get_additional_baseload_entries() == ([], None)
+        assert base.get_known_loads_entries() == ([], None)
     assert any("sensor.a" in r.getMessage() for r in caplog.records)
 
 
@@ -253,7 +253,7 @@ def test_read_error_of_an_item_with_energy_entity_still_stores():
         {},
         [{"name": "e", "entity forecast": "sensor.e", "entity energy": "sensor.kwh"}],
     )
-    assert base.get_additional_baseload_entries() == ([], [])
+    assert base.get_known_loads_entries() == ([], [])
 
 
 def test_naive_start_uses_the_home_assistant_time_zone():
@@ -283,7 +283,7 @@ def test_entries_of_items_with_and_without_energy_entity():
             {"name": "c", "entity forecast": "sensor.c"},  # no attribute
         ],
     )
-    entries, stored = base.get_additional_baseload_entries()
+    entries, stored = base.get_known_loads_entries()
     assert entries == [
         (T0, T0 + 1800, 1000.0),
         (T0 + HOUR, T0 + HOUR + 900, 500.0),
@@ -320,9 +320,9 @@ def test_save_writes_whole_slots_and_latest_forecast_wins(tmp_path):
     base.db_da = make_db_da(tmp_path)
     base.interval_s = HOUR
     run = (T0 + 300, T0 + HOUR)
-    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], *run)
+    base.save_known_loads([(T0, T0 + HOUR, 1000)], *run)
     # the forecast is withdrawn for the last quarter
-    base.save_additional_baseload([(T0, T0 + 2700, 1000)], T0 + 1200, T0 + HOUR)
+    base.save_known_loads([(T0, T0 + 2700, 1000)], T0 + 1200, T0 + HOUR)
     with base.db_da.engine.connect() as connection:
         rows = connection.exec_driver_sql(
             "SELECT time, value FROM prognoses ORDER BY time"
@@ -338,8 +338,8 @@ def test_save_writes_whole_slots_and_latest_forecast_wins(tmp_path):
 def test_current_quarter_keeps_its_stored_value(tmp_path):
     base = DaBase.__new__(DaBase)
     base.db_da = make_db_da(tmp_path)
-    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], T0, T0 + HOUR)
-    base.save_additional_baseload([(T0, T0 + HOUR, 2000)], T0 + 300, T0 + HOUR)
+    base.save_known_loads([(T0, T0 + HOUR, 1000)], T0, T0 + HOUR)
+    base.save_known_loads([(T0, T0 + HOUR, 2000)], T0 + 300, T0 + HOUR)
     with base.db_da.engine.connect() as connection:
         rows = connection.exec_driver_sql(
             "SELECT time, value FROM prognoses ORDER BY time"
@@ -358,9 +358,9 @@ def test_changing_the_interval_leaves_no_stale_rows(tmp_path, first, second):
     base.db_da = make_db_da(tmp_path)
     run = (T0, T0 + 2 * HOUR)
     base.interval_s = first
-    base.save_additional_baseload([(T0, T0 + 2 * HOUR, 1000)], *run)
+    base.save_known_loads([(T0, T0 + 2 * HOUR, 1000)], *run)
     base.interval_s = second
-    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], *run)
+    base.save_known_loads([(T0, T0 + HOUR, 1000)], *run)
     with base.db_da.engine.connect() as connection:
         rows = connection.exec_driver_sql(
             "SELECT time, value FROM prognoses ORDER BY time"
@@ -375,8 +375,8 @@ def test_changing_the_interval_leaves_no_stale_rows(tmp_path, first, second):
 def test_shorter_horizon_removes_the_old_tail(tmp_path):
     base = DaBase.__new__(DaBase)
     base.db_da = make_db_da(tmp_path)
-    base.save_additional_baseload([(T0, T0 + 3 * HOUR, 1000)], T0, T0 + 3 * HOUR)
-    base.save_additional_baseload([(T0, T0 + 3 * HOUR, 1000)], T0, T0 + HOUR)
+    base.save_known_loads([(T0, T0 + 3 * HOUR, 1000)], T0, T0 + 3 * HOUR)
+    base.save_known_loads([(T0, T0 + 3 * HOUR, 1000)], T0, T0 + HOUR)
     with base.db_da.engine.connect() as connection:
         times = [
             r[0]
@@ -389,8 +389,8 @@ def test_shorter_horizon_removes_the_old_tail(tmp_path):
 def test_save_keeps_the_rows_before_the_run(tmp_path):
     base = DaBase.__new__(DaBase)
     base.db_da = make_db_da(tmp_path)
-    base.save_additional_baseload([(T0, T0 + HOUR, 1000)], T0, T0 + HOUR)
-    base.save_additional_baseload([], T0 + 1200, T0 + HOUR)
+    base.save_known_loads([(T0, T0 + HOUR, 1000)], T0, T0 + HOUR)
+    base.save_known_loads([], T0 + 1200, T0 + HOUR)
     with base.db_da.engine.connect() as connection:
         rows = connection.exec_driver_sql(
             "SELECT time, value FROM prognoses ORDER BY time"
@@ -437,7 +437,7 @@ def all_variabel(checkdb):
         }
 
 
-ABL = [63, "abl", "Extra basislast", "kWh"]
+ABL = [63, "abl", "Bekende lasten", "kWh"]
 
 
 def test_migration_adds_abl_with_its_id(tmp_path):
@@ -458,7 +458,7 @@ def test_migration_keeps_another_variable_on_the_same_id(tmp_path):
 
 def test_migration_avoids_a_name_of_another_variable(tmp_path):
     other = {
-        "id": 70, "code": "own", "name": "Extra basislast", "dim": "kWh", "aggregate": "sum"
+        "id": 70, "code": "own", "name": "Bekende lasten", "dim": "kWh", "aggregate": "sum"
     }
     checkdb, variabel = make_variabel_db(tmp_path, [other])
     checkdb.add_variabel(variabel, ABL, "sum")
@@ -467,15 +467,15 @@ def test_migration_avoids_a_name_of_another_variable(tmp_path):
         names = dict(
             connection.exec_driver_sql("SELECT code, name FROM variabel").fetchall()
         )
-    assert names == {"own": "Extra basislast", "abl": "Extra basislast (abl)"}
+    assert names == {"own": "Bekende lasten", "abl": "Bekende lasten (abl)"}
 
 
 def test_migration_avoids_a_taken_suffixed_name(tmp_path):
     rows = [
         {"id": i, "code": c, "name": n, "dim": "kWh", "aggregate": "sum"}
         for i, c, n in (
-            (70, "own", "Extra basislast"),
-            (71, "own2", "Extra basislast (abl)"),
+            (70, "own", "Bekende lasten"),
+            (71, "own2", "Bekende lasten (abl)"),
         )
     ]
     checkdb, variabel = make_variabel_db(tmp_path, rows)
@@ -484,7 +484,7 @@ def test_migration_avoids_a_taken_suffixed_name(tmp_path):
         names = dict(
             connection.exec_driver_sql("SELECT code, name FROM variabel").fetchall()
         )
-    assert names["abl"] == "Extra basislast (abl 2)"
+    assert names["abl"] == "Bekende lasten (abl 2)"
 
 
 def test_migration_takes_the_next_id_after_the_highest(tmp_path):
@@ -541,7 +541,7 @@ def make_report(tmp_path, with_sum=True):
         "machine_consumption",
         "battery_consumption",
         "battery_production",
-        "additional_baseload",
+        "known_loads",
     ):
         setattr(report, name + "_sensors", [])
     return report, statistics
@@ -575,7 +575,7 @@ def test_energy_entity_is_subtracted_across_a_reset(tmp_path):
     grid_two_kwh_per_hour(report, statistics)
     # 0.5 kWh every hour; the meter resets in the third hour
     insert(report, statistics, 2, [5.0, 5.5, 6.0, 0.5, 1.0], [0.0, 0.5, 1.0, 1.5, 2.0])
-    report.additional_baseload_sensors = ["sensor.airco"]
+    report.known_loads_sensors = ["sensor.airco"]
     baseload = report.calc_weekday_baseload(yesterday().weekday())
     assert baseload[:4] == pytest.approx([1.5] * 4)
 
@@ -585,7 +585,7 @@ def test_energy_entity_without_statistics_is_reported_once(tmp_path, caplog):
     grid_two_kwh_per_hour(report, statistics)
     # only a state, as an entity without a state_class that still got rows
     insert(report, statistics, 4, [0.0, 1.0, 2.0, 3.0, 4.0], [None] * 5)
-    report.additional_baseload_sensors = ["sensor.no_stats", "sensor.state_only"]
+    report.known_loads_sensors = ["sensor.no_stats", "sensor.state_only"]
     weekday = yesterday().weekday()
     with caplog.at_level(logging.ERROR):
         first = report.calc_weekday_baseload(weekday)
@@ -601,7 +601,7 @@ def test_statistics_table_without_sum_column(tmp_path, caplog):
     report, statistics = make_report(tmp_path, with_sum=False)
     insert(report, statistics, 1, [0.0, 2.0, 4.0])
     insert(report, statistics, 2, [0.0, 1.0, 2.0])
-    report.additional_baseload_sensors = ["sensor.airco"]
+    report.known_loads_sensors = ["sensor.airco"]
     with caplog.at_level(logging.ERROR):
         baseload = report.calc_weekday_baseload(yesterday().weekday())
     assert baseload[:2] == pytest.approx([2.0, 2.0])
@@ -633,18 +633,18 @@ def test_stored_forecast_has_local_and_utc_hours(tmp_path):
                 "INSERT INTO prognoses (variabel, time, value) VALUES (63, ?, 0.1)",
                 (int(start + q * QUARTER),),
             )
-    df = report.get_stored_additional_baseload(
+    df = report.get_stored_known_loads(
         yesterday(), yesterday() + dt.timedelta(days=1)
     )
     assert list(df["slot"]) == [start, start + HOUR]
     assert list(df["tijd"]) == [yesterday(), yesterday() + dt.timedelta(hours=1)]
-    assert list(df["additional_baseload"]) == pytest.approx([0.4, 0.1])
+    assert list(df["known_loads"]) == pytest.approx([0.4, 0.1])
 
 
 def test_negative_baseload_is_clamped(tmp_path):
     report, statistics = make_report(tmp_path)
     grid_two_kwh_per_hour(report, statistics)
     insert(report, statistics, 2, [0.0, 3.0, 3.5, 4.0, 4.5], [0.0, 3.0, 3.5, 4.0, 4.5])
-    report.additional_baseload_sensors = ["sensor.airco"]
+    report.known_loads_sensors = ["sensor.airco"]
     baseload = report.calc_weekday_baseload(yesterday().weekday())
     assert baseload[:4] == pytest.approx([0.0, 1.5, 1.5, 1.5])

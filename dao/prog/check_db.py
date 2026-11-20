@@ -85,7 +85,7 @@ class CheckDB:
         hoogste id plus een, zodat de rijen van die andere code bij hun eigen variabele
         blijven. Is de naam, die uniek moet zijn, al van een andere code, dan
         krijgt de variabele de naam met de code erachter, bijvoorbeeld
-        "Extra basislast (abl)", en is ook die bezet "Extra basislast (abl 2)"
+        "Bekende lasten (abl)", en is ook die bezet "Bekende lasten (abl 2)"
         enzovoort. Op PostgreSQL wordt na een zelf gekozen id de sequence van id
         bijgezet.
         :param variabel_table: de tabel "variabel"
@@ -404,10 +404,10 @@ class CheckDB:
                 print('Defaults for "aggregate" set on table "variabel"')
 
         if l_version < 20261200:
-            # opgeslagen prognose van de lasten uit "additional_baseload";
+            # opgeslagen prognose van de lasten uit "known_loads";
             # na het aanmaken van de kolom "aggregate" hierboven
-            self.add_variabel(variabel_tabel, [63, "abl", "Extra basislast", "kWh"], "sum")
-            print('Table "variabel" geupdated met extra basislast.')
+            self.add_variabel(variabel_tabel, [63, "abl", "Bekende lasten", "kWh"], "sum")
+            print('Table "variabel" geupdated met bekende lasten.')
 
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()

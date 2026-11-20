@@ -1,5 +1,5 @@
 """
-Forecasts of loads that are not controlled by DAO (config "additional_baseload").
+Forecasts of loads that are not controlled by DAO (config "known_loads").
 
 A forecast is a list of entries, each with a start time, a duration and a
 power. The entries are aligned to time slots by energy: each entry adds its
@@ -77,10 +77,10 @@ def parse_entries(
             duration = _duration_s(entry[duration_field])
             power = float(entry[power_field])
         except (KeyError, TypeError, ValueError) as ex:
-            logging.debug(f"Additional baseload: entry {entry} skipped ({ex!r})")
+            logging.debug(f"Known loads: entry {entry} skipped ({ex!r})")
             continue
         if not all(math.isfinite(x) for x in (start, duration, power)):
-            logging.debug(f"Additional baseload: entry {entry} skipped")
+            logging.debug(f"Known loads: entry {entry} skipped")
             continue
         if duration <= 0 or power <= 0:
             continue

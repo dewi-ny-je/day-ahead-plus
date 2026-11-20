@@ -24,7 +24,7 @@ from sqlalchemy import and_, delete, func, insert, select
 from dao.lib.da_meteo import Meteo
 from dao.lib.da_prices import DaPrices
 from dao.lib.db_connections import make_db_da, make_db_ha
-from dao.prog import additional_baseload, da_task_queue
+from dao.prog import da_task_queue, known_loads
 from dao.prog.config.loader import config_cache
 from dao.prog.production_bonus import ProductionBonus
 
@@ -417,12 +417,12 @@ class DaBase(hass.Hass):
                 )
         self.db_da.savedata(df_db, tablename=tablename, regrid=regrid_options)
 
-    def get_additional_baseload_entries(self) -> tuple[list, list | None]:
+    def get_known_loads_entries(self) -> tuple[list, list | None]:
         """
-        Leest de prognoses van de niet door DAO gestuurde lasten uit HA
-        (instelling "additional_baseload").
+        Leest de prognoses van de bekende lasten (niet door DAO gestuurd) uit HA
+        (instelling "known_loads").
         :return: tuple (entries, stored_entries) van lijsten (start, eind,
-            vermogen in W), zie additional_baseload.parse_entries: entries van
+            vermogen in W), zie known_loads.parse_entries: entries van
             alle lasten samen, stored_entries van de lasten zonder
             energie-entiteit. Een last waarvan de prognose ontbreekt of niet te
             lezen is, levert niets. Een entiteit die Home Assistant niet kan
@@ -436,7 +436,7 @@ class DaBase(hass.Hass):
         entries = []
         stored_entries = []
         read_failed = False
-        for item in self.config.additional_baseload:
+        for item in self.config.known_loads:
             try:
                 state = self.get_state(item.entity_forecast)
                 if state is None:
@@ -445,7 +445,7 @@ class DaBase(hass.Hass):
                     raise ValueError(f"state {state.state}")
             except Exception as ex:
                 logging.warning(
-                    f"Additional baseload {item.name}: {item.entity_forecast} "
+                    f"Known load {item.name}: {item.entity_forecast} "
                     f"kan niet uit Home Assistant worden gelezen ({ex!r}); "
                     f"de berekening gaat verder zonder deze last"
                 )
@@ -455,24 +455,24 @@ class DaBase(hass.Hass):
             data = (state.attributes or {}).get(item.ha_attribute)
             if data is None:
                 logging.debug(
-                    f"Additional baseload {item.name}: geen attribuut "
+                    f"Known load {item.name}: geen attribuut "
                     f"'{item.ha_attribute}' in {item.entity_forecast}"
                 )
                 continue
-            item_entries = additional_baseload.parse_entries(
+            item_entries = known_loads.parse_entries(
                 data,
                 item.ha_start_field,
                 item.ha_duration_field,
                 item.ha_power_field,
                 self.time_zone,
             )
-            logging.debug(f"Additional baseload {item.name}: {item_entries}")
+            logging.debug(f"Known load {item.name}: {item_entries}")
             entries += item_entries
             if not item.entity_energy:
                 stored_entries += item_entries
         return entries, None if read_failed else stored_entries
 
-    def save_additional_baseload(
+    def save_known_loads(
         self, entries: list, start_ts: float, end_ts: float
     ):
         """
@@ -492,30 +492,30 @@ class DaBase(hass.Hass):
         :param start_ts: begin van de periode, utc in seconden
         :param end_ts: einde van de periode, utc in seconden
         """
-        slot_start, slot_end = additional_baseload.slot_grid(
-            start_ts, end_ts, additional_baseload.STORE_STEP_S
+        slot_start, slot_end = known_loads.slot_grid(
+            start_ts, end_ts, known_loads.STORE_STEP_S
         )
         if len(slot_start) == 0:
             return
-        energy = additional_baseload.align_entries(entries, slot_start, slot_end)
+        energy = known_loads.align_entries(entries, slot_start, slot_end)
         variabel = self.db_da.get_table("variabel")
         prognoses = self.db_da.get_table("prognoses")
         with self.db_da.engine.begin() as connection:
             variabel_id = connection.execute(
                 select(variabel.c.id).where(
-                    variabel.c.code == additional_baseload.VAR_CODE
+                    variabel.c.code == known_loads.VAR_CODE
                 )
             ).scalar()
             if variabel_id is None:
                 logging.error(
-                    f"Onbekende code opslaan data: {additional_baseload.VAR_CODE}"
+                    f"Onbekende code opslaan data: {known_loads.VAR_CODE}"
                 )
                 return
             rows = [
                 {"variabel": variabel_id, "time": int(t), "value": round(e, 6)}
                 for t, e in zip(slot_start, energy, strict=True)
             ]
-            current = int(slot_start[0]) - additional_baseload.STORE_STEP_S
+            current = int(slot_start[0]) - known_loads.STORE_STEP_S
             if start_ts < slot_start[0]:
                 stored = connection.execute(
                     select(prognoses.c.time).where(
@@ -524,7 +524,7 @@ class DaBase(hass.Hass):
                     )
                 ).first()
                 if stored is None:
-                    rest = additional_baseload.align_entries(
+                    rest = known_loads.align_entries(
                         entries, [start_ts], [slot_start[0]]
                     )[0]
                     rows.insert(

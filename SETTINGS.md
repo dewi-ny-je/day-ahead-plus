@@ -22,7 +22,7 @@
 - [Devices](#devices)
   - [🚗 EVConfig](#evconfig)
   - [🧺 MachineConfig](#machineconfig)
-  - [AdditionalBaseloadConfig](#additionalbaseloadconfig)
+  - [KnownLoadConfig](#knownloadconfig)
 - [Heating](#heating)
   - [🌡️ HeatingEnabled](#heatingenabled)
   - [💧 BoilerEnabled](#boilerenabled)
@@ -668,13 +668,13 @@ Optional: Home Assistant entity to force immediate start, bypassing optimization
 </details>
 
 
-### AdditionalBaseloadConfig
+### KnownLoadConfig
 
-_Forecast of an uncontrolled load that is added to the baseload._
+_Forecast of a known load that DAO does not control._
 
-# Additional baseload
+# Known loads
 
-Forecasts of loads that DAO does not control, for example an air conditioner or an appliance run that is already planned. Each forecast is added to the baseload, so the planning of the batteries and the other devices takes it into account.
+Forecasts of loads that DAO does not control, for example an air conditioner or an appliance run that is already planned. DAO plans these known loads on top of the baseload, so the planning of the batteries and the other devices takes it into account.
 
 ## Forecast
 
