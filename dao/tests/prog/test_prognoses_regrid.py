@@ -1,5 +1,7 @@
 """Saving calculated prognoses after a change of interval (15min <-> 1hour)."""
 
+import threading
+
 import pandas as pd
 import pytest
 from sqlalchemy import (
@@ -26,6 +28,7 @@ def db():
     manager.db_dialect = "sqlite"
     manager.engine = create_engine("sqlite:///:memory:")
     manager.metadata = MetaData()
+    manager._metadata_lock = threading.RLock()
     manager.log_pool_status = lambda: None
     metadata = MetaData()
     variabel = Table(
