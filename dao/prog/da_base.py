@@ -19,12 +19,12 @@ import pandas as pd
 import pytz
 from hassapi.models import StateList
 from requests import get
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, insert, select
 
 from dao.lib.da_meteo import Meteo
 from dao.lib.da_prices import DaPrices
 from dao.lib.db_connections import make_db_da, make_db_ha
-from dao.prog import da_task_queue
+from dao.prog import additional_baseload, da_task_queue
 from dao.prog.config.loader import config_cache
 from dao.prog.production_bonus import ProductionBonus
 
@@ -416,6 +416,132 @@ class DaBase(hass.Hass):
                     tz.localize(pd.to_datetime(first_start)).timestamp()
                 )
         self.db_da.savedata(df_db, tablename=tablename, regrid=regrid_options)
+
+    def get_additional_baseload_entries(self) -> tuple[list, list | None]:
+        """
+        Leest de prognoses van de niet door DAO gestuurde lasten uit HA
+        (instelling "additional_baseload").
+        :return: tuple (entries, stored_entries) van lijsten (start, eind,
+            vermogen in W), zie additional_baseload.parse_entries: entries van
+            alle lasten samen, stored_entries van de lasten zonder
+            energie-entiteit. Een last waarvan de prognose ontbreekt of niet te
+            lezen is, levert niets. Een entiteit die Home Assistant niet kan
+            leveren geeft een waarschuwing; een ontbrekend attribuut, het
+            gewone geval als er niets gepland is, alleen een debug-regel.
+            stored_entries is None als de entiteit van een last zonder
+            energie-entiteit niet te lezen was: de opgeslagen prognose moet
+            dan blijven staan. Tijden zonder tijdzone gelden in de tijdzone
+            van Home Assistant.
+        """
+        entries = []
+        stored_entries = []
+        read_failed = False
+        for item in self.config.additional_baseload:
+            try:
+                state = self.get_state(item.entity_forecast)
+                if state is None:
+                    raise ValueError("geen state")
+                if state.state in ("unavailable", "unknown"):
+                    raise ValueError(f"state {state.state}")
+            except Exception as ex:
+                logging.warning(
+                    f"Additional baseload {item.name}: {item.entity_forecast} "
+                    f"kan niet uit Home Assistant worden gelezen ({ex!r}); "
+                    f"de berekening gaat verder zonder deze last"
+                )
+                if not item.entity_energy:
+                    read_failed = True
+                continue
+            data = (state.attributes or {}).get(item.ha_attribute)
+            if data is None:
+                logging.debug(
+                    f"Additional baseload {item.name}: geen attribuut "
+                    f"'{item.ha_attribute}' in {item.entity_forecast}"
+                )
+                continue
+            item_entries = additional_baseload.parse_entries(
+                data,
+                item.ha_start_field,
+                item.ha_duration_field,
+                item.ha_power_field,
+                self.time_zone,
+            )
+            logging.debug(f"Additional baseload {item.name}: {item_entries}")
+            entries += item_entries
+            if not item.entity_energy:
+                stored_entries += item_entries
+        return entries, None if read_failed else stored_entries
+
+    def save_additional_baseload(
+        self, entries: list, start_ts: float, end_ts: float
+    ):
+        """
+        Slaat de prognose van de lasten zonder energie-entiteit op in de tabel
+        "prognoses" (code "abl"), als kWh per kwartier, ook als de
+        optimalisering per uur rekent: zo komen de rijen van iedere run op
+        dezelfde tijden en overschrijft een run altijd alle rijen van de vorige,
+        ook na een wissel van interval. Alle hele kwartieren tussen start_ts en
+        end_ts worden geschreven, ook die zonder verbruik, en eerder opgeslagen
+        rijen vanaf het eerste geschreven kwartier worden verwijderd, in
+        dezelfde transactie. Zo blijft van een ingetrokken prognose, of van een
+        langere horizon van een eerdere run, niets over, en blijft bij een fout
+        de vorige prognose staan. Het kwartier waarin start_ts valt houdt zijn
+        opgeslagen waarde; heeft het er nog geen, dan krijgt het de energie
+        van start_ts tot het einde van dat kwartier.
+        :param entries: lijst (start, eind, vermogen in W)
+        :param start_ts: begin van de periode, utc in seconden
+        :param end_ts: einde van de periode, utc in seconden
+        """
+        slot_start, slot_end = additional_baseload.slot_grid(
+            start_ts, end_ts, additional_baseload.STORE_STEP_S
+        )
+        if len(slot_start) == 0:
+            return
+        energy = additional_baseload.align_entries(entries, slot_start, slot_end)
+        variabel = self.db_da.get_table("variabel")
+        prognoses = self.db_da.get_table("prognoses")
+        with self.db_da.engine.begin() as connection:
+            variabel_id = connection.execute(
+                select(variabel.c.id).where(
+                    variabel.c.code == additional_baseload.VAR_CODE
+                )
+            ).scalar()
+            if variabel_id is None:
+                logging.error(
+                    f"Onbekende code opslaan data: {additional_baseload.VAR_CODE}"
+                )
+                return
+            rows = [
+                {"variabel": variabel_id, "time": int(t), "value": round(e, 6)}
+                for t, e in zip(slot_start, energy, strict=True)
+            ]
+            current = int(slot_start[0]) - additional_baseload.STORE_STEP_S
+            if start_ts < slot_start[0]:
+                stored = connection.execute(
+                    select(prognoses.c.time).where(
+                        (prognoses.c.variabel == variabel_id)
+                        & (prognoses.c.time == current)
+                    )
+                ).first()
+                if stored is None:
+                    rest = additional_baseload.align_entries(
+                        entries, [start_ts], [slot_start[0]]
+                    )[0]
+                    rows.insert(
+                        0,
+                        {
+                            "variabel": variabel_id,
+                            "time": current,
+                            "value": round(rest, 6),
+                        },
+                    )
+            connection.execute(
+                delete(prognoses).where(
+                    (prognoses.c.variabel == variabel_id)
+                    & (prognoses.c.time >= int(slot_start[0]))
+                )
+            )
+            connection.execute(insert(prognoses), rows)
 
     @staticmethod
     def get_calculated_baseload(weekday: int) -> list:

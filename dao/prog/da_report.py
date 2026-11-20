@@ -19,6 +19,7 @@ from sqlalchemy import (
     and_,
     case,
     column,
+    false,
     func,
     literal,
     select,
@@ -27,6 +28,7 @@ from sqlalchemy import (
 )
 
 from dao.lib.da_graph import GraphBuilder
+from dao.prog import additional_baseload
 from dao.prog.da_base import DaBase
 from dao.prog.production_bonus import (
     AnnualCapUsage,
@@ -102,6 +104,14 @@ class Report(DaBase):
         self.wp_consumption_sensors = _r.entities_wp_consumption if _r else []
         self.boiler_consumption_sensors = _r.entities_boiler_consumption if _r else []
         self.machine_consumption_sensors = _r.entities_machine_consumption if _r else []
+        # een energie-entiteit telt een keer mee, ook als meer lasten hem noemen
+        self.additional_baseload_sensors = list(
+            dict.fromkeys(
+                item.entity_energy
+                for item in self.config.additional_baseload
+                if item.entity_energy
+            )
+        )
 
         self.saving_consumption_dict = {
             "calc_interval": "uur",
@@ -923,11 +933,13 @@ class Report(DaBase):
         return result
 
     @staticmethod
-    def statistics_delta(t1, t2):
+    def statistics_delta(t1, t2, sum_only: bool = False):
         """
         Builds the energy used between two consecutive HA statistics rows
         :param t1: alias of the statistics row of the previous hour
         :param t2: alias of the statistics row of the hour itself
+        :param sum_only: use only the "sum" column: row pairs without it are
+            not selected
         :return: tuple (delta, valid): delta is the SQL expression of the
             increase of the meter, never negative; valid is the SQL condition
             that selects row pairs for which delta can be calculated.
@@ -940,8 +952,10 @@ class Report(DaBase):
             (t2.c.state > t1.c.state, t2.c.state - t1.c.state), else_=0
         )
         if "sum" not in t1.c:
-            return state_delta, state_valid
+            return (literal(0), false()) if sum_only else (state_delta, state_valid)
         sum_valid = t1.c.sum.isnot(None) & t2.c.sum.isnot(None)
+        if sum_only:
+            return case((t2.c.sum > t1.c.sum, t2.c.sum - t1.c.sum), else_=0), sum_valid
         delta = case(
             (sum_valid & (t2.c.sum > t1.c.sum), t2.c.sum - t1.c.sum),
             (sum_valid, 0),
@@ -2978,6 +2992,7 @@ class Report(DaBase):
             vanaf: datetime.datetime,
             tot: datetime.datetime,
             col_name: str,
+            sum_only: bool = False,
     ) -> pd.DataFrame:
         """
         Berekent de waarde van een HA-sensor over 24 uur voor een bepaalde weekdag
@@ -2986,6 +3001,7 @@ class Report(DaBase):
         :param vanaf:
         :param tot:
         :param col_name:
+        :param sum_only: alleen de kolom "sum" van de statistieken gebruiken
         :return:
         """
         """
@@ -3015,7 +3031,7 @@ class Report(DaBase):
         start_ts_param1 = vanaf.strftime("%Y-%m-%d %H:%M:%S")  # '2024-01-01 00:00:00'
         tot_ts_param1 = tot.strftime("%Y-%m-%d %H:%M:%S")
 
-        delta, valid = self.statistics_delta(t1, t2)
+        delta, valid = self.statistics_delta(t1, t2, sum_only)
 
         # Build the query to retrieve raw data
         query = (
@@ -3076,7 +3092,12 @@ class Report(DaBase):
         return df_wd
 
     def get_sensor_week_sum(
-            self, sensor_list: list, weekday: int, vanaf: datetime.datetime, col_name: str
+            self,
+            sensor_list: list,
+            weekday: int,
+            vanaf: datetime.datetime,
+            col_name: str,
+            sum_only: bool = False,
     ) -> pd.DataFrame:
         # counter = 0
         result = None
@@ -3091,7 +3112,9 @@ class Report(DaBase):
         )
         result = result.loc[result["weekdag"] == weekday]
         for sensor in sensor_list:
-            df = self.get_sensor_week_data(sensor, weekday, vanaf, tot, col_name)
+            df = self.get_sensor_week_data(
+                sensor, weekday, vanaf, tot, col_name, sum_only
+            )
             df.dropna(subset=[col_name], inplace=True)
             if len(df) == len(result):
                 result[col_name] = result[col_name] + df[col_name]
@@ -3103,6 +3126,89 @@ class Report(DaBase):
         else:
             logging.debug(f"Baseload berekening {col_name}:\n {result.to_string()}\n")
         return result
+
+    def sensors_with_sum_statistics(
+            self, sensor_list: list, vanaf: datetime.datetime
+    ) -> list:
+        """
+        Selecteert de sensoren waarvoor HA sinds vanaf langetermijnstatistieken
+        met een "sum" heeft. Voor de andere wordt per Report-object eenmalig een
+        fout gelogd.
+        :param sensor_list: lijst van entiteiten
+        :param vanaf: begin van de periode
+        :return: de sensoren uit sensor_list met statistieken
+        """
+        statistics = self.db_ha.get_table("statistics")
+        statistics_meta = self.db_ha.get_table("statistics_meta")
+        reported = self.__dict__.setdefault("_no_sum_statistics_reported", set())
+        result = []
+        for sensor in sensor_list:
+            found = False
+            if "sum" in statistics.c:
+                query = (
+                    select(statistics.c.start_ts)
+                    .select_from(
+                        statistics.join(
+                            statistics_meta,
+                            statistics_meta.c.id == statistics.c.metadata_id,
+                        )
+                    )
+                    .where(
+                        (statistics_meta.c.statistic_id == sensor)
+                        & statistics.c.sum.isnot(None)
+                        & (
+                            statistics.c.start_ts
+                            >= self.db_ha.unix_timestamp(
+                                vanaf.strftime("%Y-%m-%d %H:%M:%S")
+                            )
+                            - 3600
+                        )
+                    )
+                    .limit(1)
+                )
+                with self.db_ha.engine.connect() as connection:
+                    found = connection.execute(query).first() is not None
+            if found:
+                result.append(sensor)
+            elif sensor not in reported:
+                reported.add(sensor)
+                logging.error(
+                    f"Additional baseload: {sensor} heeft geen "
+                    f"langetermijnstatistieken met een 'sum' in Home Assistant "
+                    f"(geen state_class, of niet vastgelegd). Het verbruik "
+                    f"wordt niet van de baseload afgetrokken."
+                )
+        return result
+
+    def get_stored_additional_baseload(
+            self, vanaf: datetime.datetime, tot: datetime.datetime
+    ) -> pd.DataFrame | None:
+        """
+        Haalt de opgeslagen prognoses op van de niet door DAO gestuurde lasten
+        zonder energie-entiteit (code "abl" in "prognoses"), opgeteld per uur.
+        :param vanaf: begin van de periode
+        :param tot: einde van de periode
+        :return: dataframe met de kolommen "slot" (begin van het uur in utc
+            seconden), "tijd" (hetzelfde moment in lokale tijd) en
+            "additional_baseload" (kWh), of None als er niets is opgeslagen.
+            Een uur zonder opgeslagen waarde heeft geen rij.
+        """
+        df = self.db_da.get_column_data(
+            "prognoses", additional_baseload.VAR_CODE, start=vanaf, end=tot
+        )
+        if len(df) == 0:
+            return None
+        slot = (df["utc"].astype("int64") // 3600) * 3600
+        df = (
+            df.assign(slot=slot)
+            .groupby("slot", as_index=False)["value"]
+            .sum()
+            .rename(columns={"value": "additional_baseload"})
+        )
+        df.insert(
+            0, "tijd", [datetime.datetime.fromtimestamp(int(s)) for s in df["slot"]]
+        )
+        return df
 
     def calc_weekday_baseload(self, wd: int) -> list:
         """
@@ -3157,6 +3263,19 @@ class Report(DaBase):
             calc_start,
             "machine_consumption",
         )
+        additional_baseload_consumption = self.get_sensor_week_sum(
+            self.sensors_with_sum_statistics(
+                self.additional_baseload_sensors, calc_start
+            ),
+            wd,
+            calc_start,
+            "additional_baseload",
+            sum_only=True,
+        )
+        now = datetime.datetime.now()
+        stored_additional_baseload = self.get_stored_additional_baseload(
+            calc_start, datetime.datetime(now.year, now.month, now.day)
+        )
         battery_consumption = self.get_sensor_week_sum(
             self.battery_consumption_sensors,
             wd,
@@ -3209,6 +3328,15 @@ class Report(DaBase):
         result = Report.add_col_df(
             battery_production, result, "battery_production", "baseload"
         )
+
+        # baseload - additional baseload (met en zonder energie-entiteit)
+        result = Report.add_col_df(
+            additional_baseload_consumption, result, "additional_baseload", "baseload", True
+        )
+        result = Report.add_col_df(
+            stored_additional_baseload, result, "additional_baseload", "baseload", True
+        )
+        result["baseload"] = pd.to_numeric(result["baseload"]).clip(lower=0)
 
         logging.debug(f"Baseload berekening per uur:\n {result.to_string()}\n")
         result = result.groupby("uur", as_index=False).agg(

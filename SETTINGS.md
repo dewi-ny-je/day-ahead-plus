@@ -22,6 +22,7 @@
 - [Devices](#devices)
   - [🚗 EVConfig](#evconfig)
   - [🧺 MachineConfig](#machineconfig)
+  - [AdditionalBaseloadConfig](#additionalbaseloadconfig)
 - [Heating](#heating)
   - [🌡️ HeatingEnabled](#heatingenabled)
   - [💧 BoilerEnabled](#boilerenabled)
@@ -663,6 +664,78 @@ Optional: Home Assistant entity where the system writes the program the calculat
 **`entity instant start`**
 
 Optional: Home Assistant entity to force immediate start, bypassing optimization. Useful for urgent wash cycles. When it is on, the next optimisation plans the run to start now and then turns the entity off.
+
+</details>
+
+
+### AdditionalBaseloadConfig
+
+_Forecast of an uncontrolled load that is added to the baseload._
+
+# Additional baseload
+
+Forecasts of loads that DAO does not control, for example an air conditioner or an appliance run that is already planned. Each forecast is added to the baseload, so the planning of the batteries and the other devices takes it into account.
+
+## Forecast
+
+Each item names a Home Assistant entity with a list of entries in one of its attributes:
+
+```yaml
+forecast:
+  - start: "2026-11-14T18:10:00+01:00"
+    duration: 95        # minutes
+    power: 1200         # W
+```
+
+The entries are aligned to the intervals of the optimisation by energy: each entry adds its power times the part of its duration that falls inside an interval. Entries in the past or beyond the planning horizon are ignored. When the entity or the attribute is missing, nothing is added.
+
+## History
+
+With a calculated baseload these loads are removed from the history, so they are not counted twice:
+- **With an energy entity**: its consumption is read from the long-term statistics of Home Assistant.
+- **Without an energy entity**: DAO stores the forecast at each optimisation and subtracts the stored values.
+
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | Yes | — | Name of the load |
+| `entity forecast` | [EntityId](#entityid) | Yes | — | HA entity with the forecast of the load in an attribute |
+| `ha attribute` | string | No | `"forecast"` | Name of the attribute of the forecast entity that holds the list of entries |
+| `ha start field` | string | No | `"start"` | Name of the start time field in an entry |
+| `ha duration field` | string | No | `"duration"` | Name of the duration field in an entry (Unit: `min`) |
+| `ha power field` | string | No | `"power"` | Name of the power field in an entry (Unit: `W`) |
+| `entity energy` | [EntityId](#entityid) (optional) | No | `null` | HA energy entity (kWh or Wh) with the measured consumption of the load _Energy entity with a state_class_ |
+
+<details>
+<summary><b>📖 Field Details</b> (click to expand)</summary>
+
+**`name`**
+
+Descriptive name for this load, for example 'Air conditioner' or 'Dishwasher'. Used in the logging.
+
+**`entity forecast`**
+
+Home Assistant entity that holds the forecast of this load in one of its attributes. The attribute is a list of entries, each with a start time, a duration and a power. DAO aligns the entries to its own intervals, so they need not start or end on a quarter.
+
+**`ha attribute`**
+
+Name of the attribute of the forecast entity that holds the list of entries.
+
+**`ha start field`**
+
+Name/key of the field with the start of an entry: a date and time, preferably with a time zone (ISO 8601). Without a time zone the local time is assumed.
+
+**`ha duration field`**
+
+Name/key of the field with the duration of an entry: a number of minutes, or a text like '01:30:00' (hours:minutes:seconds).
+
+**`ha power field`**
+
+Name/key of the field with the average power of the load during the entry, in watts.
+
+**`entity energy`**
+
+Optional: Home Assistant energy entity (kWh or Wh, never power) with the measured consumption of this load. It must have a state_class ('total_increasing', or 'total' with last_reset), so that Home Assistant keeps long-term statistics for it; it may reset, for example every night. The calculated baseload subtracts this consumption from the history. Without it, DAO stores the forecast of this load and subtracts that from the history.
 
 </details>
 

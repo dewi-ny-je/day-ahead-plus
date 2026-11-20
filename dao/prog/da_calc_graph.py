@@ -204,6 +204,11 @@ def draw_calc_graph(data: dict, png_path: str):
     c_l_p = s["c_l_p"]
     c_t_n = s["c_t_n"]
     base_n = s["base_n"]
+    # forecasts of uncontrolled loads (additional_baseload), drawn on top of
+    # the baseload; absent in data saved without them
+    abl_n = s.get("abl_n", np.zeros(U))
+    show_abl = bool(data.get("additional_baseload"))
+    fixed_n = base_n + abl_n
     boiler_n = s["boiler_n"]
     heatpump_n = s["heatpump_n"]
     ev_n = s["ev_n"]
@@ -249,11 +254,19 @@ def draw_calc_graph(data: dict, png_path: str):
         _area(axis[0],
             tijd, base_n, label="Overig verbr.", color="#f1a603"
         )
+        if show_abl:
+            _area(axis[0],
+                tijd,
+                abl_n,
+                bottom=base_n,
+                label="Extra basisl.",
+                color="#2a9d8f",
+            )
         if data["boiler"]:
             _area(axis[0],
                 tijd,
                 boiler_n,
-                bottom=base_n,
+                bottom=fixed_n,
                 label="Boiler",
                 color="#e39ff6",
             )
@@ -261,7 +274,7 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[0],
                 tijd,
                 heatpump_n,
-                bottom=base_n + boiler_n,
+                bottom=fixed_n + boiler_n,
                 label="WP",
                 color="#a32cc4",
             )
@@ -269,7 +282,7 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[0],
                 tijd,
                 ev_n,
-                bottom=base_n + boiler_n + heatpump_n,
+                bottom=fixed_n + boiler_n + heatpump_n,
                 label="EV laden",
                 color="yellow",
             )
@@ -277,14 +290,14 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[0],
                 tijd,
                 mach_n,
-                bottom=base_n + boiler_n + heatpump_n + ev_n,
+                bottom=fixed_n + boiler_n + heatpump_n + ev_n,
                 label="Apparatuur",
                 color="brown",
             )
         _area(axis[0],
             tijd,
             org_t,
-            bottom=base_n + boiler_n + heatpump_n + ev_n + mach_n,
+            bottom=fixed_n + boiler_n + heatpump_n + ev_n + mach_n,
             label="Teruglev.",
             color="#0080ff",
         )
@@ -342,11 +355,19 @@ def draw_calc_graph(data: dict, png_path: str):
         _area(axis[1],
             tijd, base_n, label="Overig verbr.", color="#f1a603"
         )
+        if show_abl:
+            _area(axis[1],
+                tijd,
+                abl_n,
+                bottom=base_n,
+                label="Extra basisl.",
+                color="#2a9d8f",
+            )
         if data["boiler"]:
             _area(axis[1],
                 tijd,
                 boiler_n,
-                bottom=base_n,
+                bottom=fixed_n,
                 label="Boiler",
                 color="#e39ff6",
             )
@@ -354,7 +375,7 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[1],
                 tijd,
                 heatpump_n,
-                bottom=base_n + boiler_n,
+                bottom=fixed_n + boiler_n,
                 label="WP",
                 color="#a32cc4",
             )
@@ -362,7 +383,7 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[1],
                 tijd,
                 ev_n,
-                bottom=base_n + boiler_n + heatpump_n,
+                bottom=fixed_n + boiler_n + heatpump_n,
                 label="EV laden",
                 color="yellow",
             )
@@ -370,7 +391,7 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[1],
                 tijd,
                 mach_n,
-                bottom=base_n + boiler_n + heatpump_n + ev_n,
+                bottom=fixed_n + boiler_n + heatpump_n + ev_n,
                 label="Apparatuur",
                 color="brown",
             )
@@ -378,14 +399,14 @@ def draw_calc_graph(data: dict, png_path: str):
             _area(axis[1],
                 tijd,
                 accu_in_n,
-                bottom=base_n + boiler_n + heatpump_n + ev_n + mach_n,
+                bottom=fixed_n + boiler_n + heatpump_n + ev_n + mach_n,
                 label="Accu in",
                 color="#ff8000",
             )
         _area(axis[1],
             tijd,
             c_t_n,
-            bottom=base_n + boiler_n + heatpump_n + ev_n + mach_n + accu_in_n,
+            bottom=fixed_n + boiler_n + heatpump_n + ev_n + mach_n + accu_in_n,
             label="Teruglev.",
             color="#0080ff",
         )

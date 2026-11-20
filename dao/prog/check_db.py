@@ -19,6 +19,7 @@ from sqlalchemy import (
     and_,
     delete,
     desc,
+    func,
     insert,
     inspect,
     literal,
@@ -76,6 +77,64 @@ class CheckDB:
         with self.engine.connect() as connection:
             connection.execute(query)
             connection.commit()
+
+    def add_variabel(self, variabel_table, record, aggregate: str):
+        """
+        Voegt een variabele toe, of werkt hem bij als zijn code al bestaat. Is
+        het id van record al van een andere code, dan krijgt de variabele het
+        hoogste id plus een, zodat de rijen van die andere code bij hun eigen variabele
+        blijven. Is de naam, die uniek moet zijn, al van een andere code, dan
+        krijgt de variabele de naam met de code erachter, bijvoorbeeld
+        "Extra basislast (abl)", en is ook die bezet "Extra basislast (abl 2)"
+        enzovoort. Op PostgreSQL wordt na een zelf gekozen id de sequence van id
+        bijgezet.
+        :param variabel_table: de tabel "variabel"
+        :param record: [id, code, naam, dimensie]
+        :param aggregate: "sum" of "avg"
+        """
+        var_id, code, name, dim = record
+        with self.engine.begin() as connection:
+            by_code = connection.execute(
+                select(variabel_table.c.id).where(variabel_table.c.code == code)
+            ).first()
+            by_id = connection.execute(
+                select(variabel_table.c.code).where(variabel_table.c.id == var_id)
+            ).first()
+            other_names = set(
+                connection.execute(
+                    select(variabel_table.c.name).where(variabel_table.c.code != code)
+                ).scalars()
+            )
+            base_name = name
+            n = 1
+            while name in other_names:
+                suffix = code if n == 1 else f"{code} {n}"
+                name = f"{base_name} ({suffix})"
+                n += 1
+            values = {"code": code, "name": name, "dim": dim, "aggregate": aggregate}
+            if by_code is not None:
+                connection.execute(
+                    update(variabel_table)
+                    .where(variabel_table.c.id == by_code.id)
+                    .values(**values)
+                )
+            elif by_id is None:
+                connection.execute(insert(variabel_table).values(id=var_id, **values))
+            else:
+                free_id = connection.execute(
+                    select(func.max(variabel_table.c.id))
+                ).scalar()
+                connection.execute(
+                    insert(variabel_table).values(id=free_id + 1, **values)
+                )
+                if connection.dialect.name == "postgresql":
+                    # de sequence van id voorbij het expliciet gekozen id zetten
+                    connection.execute(
+                        text(
+                            "SELECT setval(pg_get_serial_sequence('variabel', 'id'), "
+                            "(SELECT MAX(id) FROM variabel))"
+                        )
+                    )
 
     def get_all_var_data(
         self,
@@ -343,6 +402,12 @@ class CheckDB:
                     )
                 )
                 print('Defaults for "aggregate" set on table "variabel"')
+
+        if l_version < 20261200:
+            # opgeslagen prognose van de lasten uit "additional_baseload";
+            # na het aanmaken van de kolom "aggregate" hierboven
+            self.add_variabel(variabel_tabel, [63, "abl", "Extra basislast", "kWh"], "sum")
+            print('Table "variabel" geupdated met extra basislast.')
 
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()
