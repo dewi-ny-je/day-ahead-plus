@@ -96,11 +96,14 @@ class Report(DaBase):
         self.wp_consumption_sensors = _r.entities_wp_consumption if _r else []
         self.boiler_consumption_sensors = _r.entities_boiler_consumption if _r else []
         self.machine_consumption_sensors = _r.entities_machine_consumption if _r else []
-        self.additional_baseload_sensors = [
-            item.entity_energy
-            for item in self.config.additional_baseload
-            if item.entity_energy
-        ]
+        # een energie-entiteit telt een keer mee, ook als meer lasten hem noemen
+        self.additional_baseload_sensors = list(
+            dict.fromkeys(
+                item.entity_energy
+                for item in self.config.additional_baseload
+                if item.entity_energy
+            )
+        )
 
         self.saving_consumption_dict = {
             "calc_interval": "uur",

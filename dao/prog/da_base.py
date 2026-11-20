@@ -395,7 +395,7 @@ class DaBase(hass.Hass):
         logging.debug(f"Save calculated data:\n{df_db.to_string()}")
         self.db_da.savedata(df_db, tablename=tablename)
 
-    def get_additional_baseload_entries(self) -> tuple[list, list]:
+    def get_additional_baseload_entries(self) -> tuple[list, list | None]:
         """
         Leest de prognoses van de niet door DAO gestuurde lasten uit HA
         (instelling "additional_baseload").
