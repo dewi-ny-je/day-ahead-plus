@@ -28,7 +28,7 @@ from sqlalchemy import (
 )
 
 from dao.lib.da_graph import GraphBuilder
-from dao.prog import additional_baseload
+from dao.prog import known_loads
 from dao.prog.da_base import DaBase
 from dao.prog.production_bonus import (
     AnnualCapUsage,
@@ -97,10 +97,10 @@ class Report(DaBase):
         self.boiler_consumption_sensors = _r.entities_boiler_consumption if _r else []
         self.machine_consumption_sensors = _r.entities_machine_consumption if _r else []
         # een energie-entiteit telt een keer mee, ook als meer lasten hem noemen
-        self.additional_baseload_sensors = list(
+        self.known_loads_sensors = list(
             dict.fromkeys(
                 item.entity_energy
-                for item in self.config.additional_baseload
+                for item in self.config.known_loads
                 if item.entity_energy
             )
         )
@@ -3165,28 +3165,28 @@ class Report(DaBase):
             elif sensor not in reported:
                 reported.add(sensor)
                 logging.error(
-                    f"Additional baseload: {sensor} heeft geen "
+                    f"Known loads: {sensor} heeft geen "
                     f"langetermijnstatistieken met een 'sum' in Home Assistant "
                     f"(geen state_class, of niet vastgelegd). Het verbruik "
                     f"wordt niet van de baseload afgetrokken."
                 )
         return result
 
-    def get_stored_additional_baseload(
+    def get_stored_known_loads(
             self, vanaf: datetime.datetime, tot: datetime.datetime
     ) -> pd.DataFrame | None:
         """
-        Haalt de opgeslagen prognoses op van de niet door DAO gestuurde lasten
+        Haalt de opgeslagen prognoses op van de bekende lasten (niet door DAO gestuurd)
         zonder energie-entiteit (code "abl" in "prognoses"), opgeteld per uur.
         :param vanaf: begin van de periode
         :param tot: einde van de periode
         :return: dataframe met de kolommen "slot" (begin van het uur in utc
             seconden), "tijd" (hetzelfde moment in lokale tijd) en
-            "additional_baseload" (kWh), of None als er niets is opgeslagen.
+            "known_loads" (kWh), of None als er niets is opgeslagen.
             Een uur zonder opgeslagen waarde heeft geen rij.
         """
         df = self.db_da.get_column_data(
-            "prognoses", additional_baseload.VAR_CODE, start=vanaf, end=tot
+            "prognoses", known_loads.VAR_CODE, start=vanaf, end=tot
         )
         if len(df) == 0:
             return None
@@ -3195,7 +3195,7 @@ class Report(DaBase):
             df.assign(slot=slot)
             .groupby("slot", as_index=False)["value"]
             .sum()
-            .rename(columns={"value": "additional_baseload"})
+            .rename(columns={"value": "known_loads"})
         )
         df.insert(
             0, "tijd", [datetime.datetime.fromtimestamp(int(s)) for s in df["slot"]]
@@ -3255,17 +3255,17 @@ class Report(DaBase):
             calc_start,
             "machine_consumption",
         )
-        additional_baseload_consumption = self.get_sensor_week_sum(
+        known_loads_consumption = self.get_sensor_week_sum(
             self.sensors_with_sum_statistics(
-                self.additional_baseload_sensors, calc_start
+                self.known_loads_sensors, calc_start
             ),
             wd,
             calc_start,
-            "additional_baseload",
+            "known_loads",
             sum_only=True,
         )
         now = datetime.datetime.now()
-        stored_additional_baseload = self.get_stored_additional_baseload(
+        stored_known_loads = self.get_stored_known_loads(
             calc_start, datetime.datetime(now.year, now.month, now.day)
         )
         battery_consumption = self.get_sensor_week_sum(
@@ -3321,12 +3321,12 @@ class Report(DaBase):
             battery_production, result, "battery_production", "baseload"
         )
 
-        # baseload - additional baseload (met en zonder energie-entiteit)
+        # baseload - known loads (met en zonder energie-entiteit)
         result = Report.add_col_df(
-            additional_baseload_consumption, result, "additional_baseload", "baseload", True
+            known_loads_consumption, result, "known_loads", "baseload", True
         )
         result = Report.add_col_df(
-            stored_additional_baseload, result, "additional_baseload", "baseload", True
+            stored_known_loads, result, "known_loads", "baseload", True
         )
         result["baseload"] = pd.to_numeric(result["baseload"]).clip(lower=0)
 

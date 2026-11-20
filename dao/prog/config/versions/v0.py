@@ -10,7 +10,6 @@ from typing import Literal
 
 from pydantic import ConfigDict, Field
 
-from ..models.additional_baseload import AdditionalBaseloadConfig
 from ..models.base import DAOConfigBaseModel, FlexEnum, FlexFloat, SecretStr
 from ..models.dashboard import DashboardConfig
 from ..models.database import DatabaseConfig, HADatabaseConfig
@@ -24,6 +23,7 @@ from ..models.graphics import GraphicsConfig
 from ..models.grid import GridConfig
 from ..models.history import HistoryConfig
 from ..models.homeassistant import HomeAssistantConfig
+from ..models.known_loads import KnownLoadConfig
 from ..models.notifications import NotificationsConfig
 from ..models.pricing import PricingConfig
 from ..models.report import ReportConfig
@@ -265,10 +265,10 @@ class ConfigurationV0(DAOConfigBaseModel):
         description="Appliance/machine configurations",
         json_schema_extra={"x-ui-section": "Machines"},
     )
-    additional_baseload: list[AdditionalBaseloadConfig] = Field(
+    known_loads: list[KnownLoadConfig] = Field(
         default_factory=list,
-        description="Forecasts of uncontrolled loads that are added to the baseload",
-        json_schema_extra={"x-ui-section": "Additional baseload"},
+        description="Forecasts of known loads that DAO does not control",
+        json_schema_extra={"x-ui-section": "Known loads"},
     )
 
     # Optional devices

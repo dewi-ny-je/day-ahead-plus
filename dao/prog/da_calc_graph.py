@@ -204,10 +204,10 @@ def draw_calc_graph(data: dict, png_path: str):
     c_l_p = s["c_l_p"]
     c_t_n = s["c_t_n"]
     base_n = s["base_n"]
-    # forecasts of uncontrolled loads (additional_baseload), drawn on top of
+    # forecasts of uncontrolled loads (known_loads), drawn on top of
     # the baseload; absent in data saved without them
     abl_n = s.get("abl_n", np.zeros(U))
-    show_abl = bool(data.get("additional_baseload"))
+    show_abl = bool(data.get("known_loads"))
     fixed_n = base_n + abl_n
     boiler_n = s["boiler_n"]
     heatpump_n = s["heatpump_n"]
@@ -259,7 +259,7 @@ def draw_calc_graph(data: dict, png_path: str):
                 tijd,
                 abl_n,
                 bottom=base_n,
-                label="Extra basisl.",
+                label="Bekende lasten",
                 color="#2a9d8f",
             )
         if data["boiler"]:
@@ -360,7 +360,7 @@ def draw_calc_graph(data: dict, png_path: str):
                 tijd,
                 abl_n,
                 bottom=base_n,
-                label="Extra basisl.",
+                label="Bekende lasten",
                 color="#2a9d8f",
             )
         if data["boiler"]:
