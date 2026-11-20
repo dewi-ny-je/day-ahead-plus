@@ -477,7 +477,7 @@ class DaBase(hass.Hass):
     ):
         """
         Slaat de prognose van de lasten zonder energie-entiteit op in de tabel
-        "prognoses" (code "abl"), als kWh per kwartier, ook als de
+        "prognoses" (code "kl"), als kWh per kwartier, ook als de
         optimalisering per uur rekent: zo komen de rijen van iedere run op
         dezelfde tijden en overschrijft een run altijd alle rijen van de vorige,
         ook na een wissel van interval. Alle hele kwartieren tussen start_ts en

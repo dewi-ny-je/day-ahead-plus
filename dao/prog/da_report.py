@@ -3185,7 +3185,7 @@ class Report(DaBase):
     ) -> pd.DataFrame | None:
         """
         Haalt de opgeslagen prognoses op van de bekende lasten (niet door DAO gestuurd)
-        zonder energie-entiteit (code "abl" in "prognoses"), opgeteld per uur.
+        zonder energie-entiteit (code "kl" in "prognoses"), opgeteld per uur.
         :param vanaf: begin van de periode
         :param tot: einde van de periode
         :return: dataframe met de kolommen "slot" (begin van het uur in utc

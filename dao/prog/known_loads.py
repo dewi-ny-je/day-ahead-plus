@@ -13,7 +13,7 @@ import math
 import pandas as pd
 
 # code of the stored forecast in the table "variabel"
-VAR_CODE = "abl"
+VAR_CODE = "kl"
 # length in seconds of the intervals in which the forecast is stored,
 # independent of the interval of the optimisation
 STORE_STEP_S = 900

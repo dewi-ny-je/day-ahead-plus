@@ -690,29 +690,29 @@ class DaCalc(DaBase):
         # prognoses van de bekende lasten (niet door DAO gestuurd): de energie in kWh die
         # in iedere stap valt, voor de eerste stap vanaf het begin van de run.
         # b_l wordt overal met interval_fraction vermenigvuldigd.
-        abl_l = [0.0] * U
-        abl_stored_entries = None
+        kl_l = [0.0] * U
+        kl_stored_entries = None
         if self.config.known_loads and U > 0:
-            abl_entries, abl_stored_entries = self.get_known_loads_entries()
+            kl_entries, kl_stored_entries = self.get_known_loads_entries()
             slot_start = [float(t) for t in ts[:U]]
             horizon_end_ts = (
                 slot_start[-1] if U > 1 else float(start_interval_ts)
             ) + step_s[U - 1]
             slot_end = slot_start[1:] + [horizon_end_ts]
-            abl_l = known_loads.align_entries(
-                abl_entries, slot_start, slot_end
+            kl_l = known_loads.align_entries(
+                kl_entries, slot_start, slot_end
             )
-            b_l = [b_l[u] + abl_l[u] / interval_fraction[u] for u in range(U)]
+            b_l = [b_l[u] + kl_l[u] / interval_fraction[u] for u in range(U)]
             if (
                 not self.debug
-                and abl_stored_entries is not None
+                and kl_stored_entries is not None
                 and any(
                     not item.entity_energy
                     for item in self.config.known_loads
                 )
             ):
                 self.save_known_loads(
-                    abl_stored_entries, start_ts, horizon_end_ts
+                    kl_stored_entries, start_ts, horizon_end_ts
                 )
         # p_avg1 = sum(pl) / U  # max(pl) #
         sum_w_prices = 0
@@ -738,7 +738,7 @@ class DaCalc(DaBase):
                         "p_l": pl,
                         "p_t": pt,
                         "base": b_l,
-                        "abl": abl_l,
+                        "kl": kl_l,
                         "pv_ac": pv_org_ac,
                         "pv_dc": pv_org_dc,
                     }
@@ -5038,7 +5038,7 @@ class DaCalc(DaBase):
         accu_out_p = []
         c_t_n = []
         base_n = []
-        abl_n = []
+        kl_n = []
         boiler_n = []
         heatpump_n = []
         mach_n = []
@@ -5052,8 +5052,8 @@ class DaCalc(DaBase):
         for u in range(U):
             c_t_n.append(-c_t[u].x/hour_fraction[u])
             c_l_p.append(c_l[u].x/hour_fraction[u])
-            abl_n.append(-abl_l[u] / hour_fraction[u])
-            base_n.append(-b_l[u] * interval_fraction[u] / hour_fraction[u] - abl_n[u])
+            kl_n.append(-kl_l[u] / hour_fraction[u])
+            base_n.append(-b_l[u] * interval_fraction[u] / hour_fraction[u] - kl_n[u])
             boiler_n.append(-c_b[u].x/hour_fraction[u])
             heatpump_n.append(-c_hp[u].x/hour_fraction[u])
             ev_n.append(-c_ev_sum[u]/hour_fraction[u])
@@ -5165,7 +5165,7 @@ class DaCalc(DaBase):
                     "c_l_p": c_l_p,
                     "c_t_n": c_t_n,
                     "base_n": base_n,
-                    "abl_n": abl_n,
+                    "kl_n": kl_n,
                     "boiler_n": boiler_n,
                     "heatpump_n": heatpump_n,
                     "ev_n": ev_n,

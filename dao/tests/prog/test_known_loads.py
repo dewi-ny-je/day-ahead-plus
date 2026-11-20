@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 
 from dao.lib.db_manager import DBmanagerObj
-from dao.prog import known_loads as abl
+from dao.prog import known_loads as kl
 from dao.prog.check_db import CheckDB
 from dao.prog.config.models.known_loads import KnownLoadConfig
 from dao.prog.da_base import DaBase
@@ -39,7 +39,7 @@ def test_parse_entries_reads_fields_and_units():
         {"begin": "2026-01-05T12:05:00", "len": 20, "watt": 1200},
         {"begin": "2026-01-05T13:00:00", "len": "01:30:00", "watt": "500"},
     ]
-    entries = abl.parse_entries(data, "begin", "len", "watt")
+    entries = kl.parse_entries(data, "begin", "len", "watt")
     assert entries == [
         (T0 + 300, T0 + 300 + 1200, 1200.0),
         (T0 + HOUR, T0 + HOUR + 5400, 500.0),
@@ -48,7 +48,7 @@ def test_parse_entries_reads_fields_and_units():
 
 def test_parse_entries_honours_time_zone():
     aware = dt.datetime(2026, 1, 5, 11, 0, tzinfo=dt.UTC)
-    entries = abl.parse_entries(
+    entries = kl.parse_entries(
         [{"start": aware.isoformat(), "duration": 15, "power": 100}],
         "start",
         "duration",
@@ -75,21 +75,21 @@ def test_parse_entries_honours_time_zone():
     ],
 )
 def test_parse_entries_skips_unusable(data):
-    assert abl.parse_entries(data, "start", "duration", "power") == []
+    assert kl.parse_entries(data, "start", "duration", "power") == []
 
 
 # -------------------------------------------------------------- alignment
 def test_run_inside_one_quarter():
     slot_start, slot_end = quarters(4)
     # 6 minutes of 2 kW from 12:17
-    energy = abl.align_entries([(T0 + 1020, T0 + 1380, 2000)], slot_start, slot_end)
+    energy = kl.align_entries([(T0 + 1020, T0 + 1380, 2000)], slot_start, slot_end)
     assert energy == pytest.approx([0, 0.2, 0, 0])
 
 
 def test_run_over_parts_of_several_quarters():
     slot_start, slot_end = quarters(4)
     # 12:10 - 12:40 at 1 kW: 5, 15 and 10 minutes
-    energy = abl.align_entries([(T0 + 600, T0 + 2400, 1000)], slot_start, slot_end)
+    energy = kl.align_entries([(T0 + 600, T0 + 2400, 1000)], slot_start, slot_end)
     assert energy == pytest.approx([5 / 60, 0.25, 10 / 60, 0])
     assert sum(energy) == pytest.approx(0.5)
 
@@ -102,7 +102,7 @@ def test_hourly_slots_and_summed_items():
         (T0 + QUARTER, T0 + QUARTER + 2 * HOUR, 1000),
         (T0, T0 + QUARTER, 400),
     ]
-    energy = abl.align_entries(entries, slot_start, slot_end)
+    energy = kl.align_entries(entries, slot_start, slot_end)
     assert energy == pytest.approx([0.1, 0.25, 1.0, 0.75])
 
 
@@ -113,7 +113,7 @@ def test_outside_the_slots_adds_nothing():
         (T0 + HOUR, T0 + 2 * HOUR, 1000),  # starts after the last slot
         (T0 - QUARTER, T0 + 300, 1200),  # only its last 5 minutes count
     ]
-    energy = abl.align_entries(entries, slot_start, slot_end)
+    energy = kl.align_entries(entries, slot_start, slot_end)
     assert energy == pytest.approx([0.1, 0])
 
 
@@ -121,15 +121,15 @@ def test_first_slot_counts_from_the_start_of_the_run():
     # the run starts 5 minutes into the first quarter
     slot_start = [T0 + 300, T0 + QUARTER]
     slot_end = [T0 + QUARTER, T0 + 2 * QUARTER]
-    energy = abl.align_entries([(T0, T0 + 2 * QUARTER, 1000)], slot_start, slot_end)
+    energy = kl.align_entries([(T0, T0 + 2 * QUARTER, 1000)], slot_start, slot_end)
     assert energy == pytest.approx([10 / 60, 0.25])
 
 
 def test_slot_grid_holds_whole_slots_only():
-    slot_start, slot_end = abl.slot_grid(T0 + 300, T0 + HOUR, QUARTER)
+    slot_start, slot_end = kl.slot_grid(T0 + 300, T0 + HOUR, QUARTER)
     assert slot_start == [T0 + QUARTER, T0 + 2 * QUARTER, T0 + 3 * QUARTER]
     assert slot_end == [T0 + 2 * QUARTER, T0 + 3 * QUARTER, T0 + HOUR]
-    assert abl.slot_grid(T0, T0 + QUARTER, QUARTER) == ([T0], [T0 + QUARTER])
+    assert kl.slot_grid(T0, T0 + QUARTER, QUARTER) == ([T0], [T0 + QUARTER])
 
 
 # ------------------------------------------------------------------ config
@@ -180,7 +180,7 @@ def test_alignment_matches_full_overlap_sum_on_a_mixed_grid():
         )
         for u in range(len(slot_start))
     ]
-    assert abl.align_entries(entries, slot_start, slot_end) == pytest.approx(expected)
+    assert kl.align_entries(entries, slot_start, slot_end) == pytest.approx(expected)
 
 
 # ----------------------------------------------------- reading the forecast
@@ -257,7 +257,7 @@ def test_read_error_of_an_item_with_energy_entity_still_stores():
 
 
 def test_naive_start_uses_the_home_assistant_time_zone():
-    entries = abl.parse_entries(
+    entries = kl.parse_entries(
         [{"start": "2026-01-05T12:00:00", "duration": 15, "power": 100}],
         "start",
         "duration",
@@ -311,7 +311,7 @@ def make_db_da(tmp_path):
     )
     md.create_all(db_da.engine)
     with db_da.engine.begin() as connection:
-        connection.execute(variabel.insert(), [{"id": 63, "code": abl.VAR_CODE}])
+        connection.execute(variabel.insert(), [{"id": 63, "code": kl.VAR_CODE}])
     return db_da
 
 
@@ -437,23 +437,23 @@ def all_variabel(checkdb):
         }
 
 
-ABL = [63, "abl", "Bekende lasten", "kWh"]
+KL = [63, "kl", "Bekende lasten", "kWh"]
 
 
 def test_migration_adds_abl_with_its_id(tmp_path):
     checkdb, variabel = make_variabel_db(tmp_path, [])
-    checkdb.add_variabel(variabel, ABL, "sum")
-    checkdb.add_variabel(variabel, ABL, "sum")
-    assert all_variabel(checkdb) == {(63, "abl", "sum")}
+    checkdb.add_variabel(variabel, KL, "sum")
+    checkdb.add_variabel(variabel, KL, "sum")
+    assert all_variabel(checkdb) == {(63, "kl", "sum")}
 
 
 def test_migration_keeps_another_variable_on_the_same_id(tmp_path):
     other = {"id": 63, "code": "own", "name": "Own", "dim": "kWh", "aggregate": "sum"}
     checkdb, variabel = make_variabel_db(tmp_path, [other])
-    checkdb.add_variabel(variabel, ABL, "sum")
+    checkdb.add_variabel(variabel, KL, "sum")
     rows = all_variabel(checkdb)
     assert (63, "own", "sum") in rows
-    assert {code for _, code, _ in rows} == {"own", "abl"}
+    assert {code for _, code, _ in rows} == {"own", "kl"}
 
 
 def test_migration_avoids_a_name_of_another_variable(tmp_path):
@@ -461,13 +461,13 @@ def test_migration_avoids_a_name_of_another_variable(tmp_path):
         "id": 70, "code": "own", "name": "Bekende lasten", "dim": "kWh", "aggregate": "sum"
     }
     checkdb, variabel = make_variabel_db(tmp_path, [other])
-    checkdb.add_variabel(variabel, ABL, "sum")
-    checkdb.add_variabel(variabel, ABL, "sum")
+    checkdb.add_variabel(variabel, KL, "sum")
+    checkdb.add_variabel(variabel, KL, "sum")
     with checkdb.engine.connect() as connection:
         names = dict(
             connection.exec_driver_sql("SELECT code, name FROM variabel").fetchall()
         )
-    assert names == {"own": "Bekende lasten", "abl": "Bekende lasten (abl)"}
+    assert names == {"own": "Bekende lasten", "kl": "Bekende lasten (kl)"}
 
 
 def test_migration_avoids_a_taken_suffixed_name(tmp_path):
@@ -475,16 +475,16 @@ def test_migration_avoids_a_taken_suffixed_name(tmp_path):
         {"id": i, "code": c, "name": n, "dim": "kWh", "aggregate": "sum"}
         for i, c, n in (
             (70, "own", "Bekende lasten"),
-            (71, "own2", "Bekende lasten (abl)"),
+            (71, "own2", "Bekende lasten (kl)"),
         )
     ]
     checkdb, variabel = make_variabel_db(tmp_path, rows)
-    checkdb.add_variabel(variabel, ABL, "sum")
+    checkdb.add_variabel(variabel, KL, "sum")
     with checkdb.engine.connect() as connection:
         names = dict(
             connection.exec_driver_sql("SELECT code, name FROM variabel").fetchall()
         )
-    assert names["abl"] == "Bekende lasten (abl 2)"
+    assert names["kl"] == "Bekende lasten (kl 2)"
 
 
 def test_migration_takes_the_next_id_after_the_highest(tmp_path):
@@ -493,8 +493,8 @@ def test_migration_takes_the_next_id_after_the_highest(tmp_path):
         for i, c in ((63, "own"), (70, "high"))
     ]
     checkdb, variabel = make_variabel_db(tmp_path, rows)
-    checkdb.add_variabel(variabel, ABL, "sum")
-    assert (71, "abl", "sum") in all_variabel(checkdb)
+    checkdb.add_variabel(variabel, KL, "sum")
+    assert (71, "kl", "sum") in all_variabel(checkdb)
 
 
 def make_report(tmp_path, with_sum=True):
